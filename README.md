@@ -67,4 +67,7 @@ functionality.
 Scripts
 ==========
 
-- schemamod.pl: given schema file, generate erlang schema module
+- bin/schemamod.pl: given schema file, generate erlang schema module
+- src/*.erl: erlang files to further process the schema
+- examples/*: usage examples (NB: need more work)
+- test/*: tests (NB: empty at time of writing)
