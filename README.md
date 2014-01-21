@@ -4,7 +4,10 @@ Schematool
 Helpful tools to generate, maintain and evolve a mnesia schema.
 
 The mnesia schema is usually managed ad hoc inside various
-erlang modules and scripts.
+erlang modules and scripts. Schematool provides a way to instead
+manage the schema as a data structure.
+
+STATUS: tool chain unfinished.
 
 Usage
 ----------
