@@ -1,0 +1,7 @@
+%% -*- Erlang -*-
+%%=preamble
+-include_lib("kernel/include/file.hrl").
+
+%%=schema
+
+[buggy, boo].
