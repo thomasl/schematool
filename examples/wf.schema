@@ -1,0 +1,18 @@
+%% -*- Erlang -*-
+%%
+%% Expanded by schematool.
+%%
+%%=preamble
+
+%-include_lib("kernel/include/file.hrl").
+
+-include("wf.hrl").
+
+%%=schema
+
+[{table, wf, [{type, set},
+	      {attribute, record_info(fields, wf)}]},
+ {table, wf_timer,
+  [{type, bag},
+   {attribute, record_info(fields, wf_timer)}]},
+ {table, 
