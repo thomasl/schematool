@@ -55,6 +55,8 @@ HRL_SRC= \
 BEHAVIOUR_SRC= \
 
 SCHEMATOOL_MODS= \
+	schematool \
+
 
 SCHEMATOOL_SRC := $(patsubst %, %.erl, $(SCHEMATOOL_MODS))
 OM_SRC=$(SCHEMATOOL_SRC)

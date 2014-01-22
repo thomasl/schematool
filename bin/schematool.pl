@@ -3,7 +3,9 @@
 # Toplevel
 #
 # UNFINISHED
-# - currently just invokes the subscripts
+# - just generates+compiles schema module
+# - module probably should have VERSIONED name
+#   * foundation of schema diffs (in erlang ctx)
 # - escape/quote options values?
 # - option 'einc' is not pretty
 
