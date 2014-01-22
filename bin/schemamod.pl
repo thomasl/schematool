@@ -26,13 +26,57 @@
 ## There is no support for multiple occurrences of
 ## the same name. There is an implicit section for
 ## lines before the first header, called 'prologue'.
+##
+## UNFINISHED
+## - predefined -import to make schema defs even simpler
 
-my $file = shift @ARGV or die "Schema file name missing";
+use Getopt::Long;
+use File::Basename qw(fileparse basename);
+use strict;
 
-my @parts = split(/[.]/, $file);
-my $module_prefix = $parts[0];
-my $module = $module_prefix."_schema";
-my $outfile = $module.".erl";
+## Options mangling
+
+my $file;
+my $outfile;
+my $module;
+my $force_overwrite = 0;
+
+GetOptions(
+    'schemafile=s' => \$file,
+    'outfile=s' => \$outfile,
+    'module=s' => \$module,
+    'force' => \$force_overwrite
+    );
+
+unless ($file) {
+    die "No schema file given (--schemafile file.schema)";
+}
+
+unless ($outfile) {
+    die "No output file given (--outfile file.erl)";
+}
+
+unless ($module) {
+    my $module_prefix = basename($file, ".schema");
+    $module = $module_prefix."_schema";
+}
+
+unless (-f $file) {
+    die "Schema file $file does not exist";
+}
+
+if (-e $outfile) {
+    if ($force_overwrite) {
+	# print STDERR "Overwriting existing $outfile\n";
+    } else {
+	die "Output file $outfile already exists";
+    }
+}
+
+# print STDERR "Input: $file\nOutput: $outfile\nMod: $module\n";
+
+## Main body of script
+
 my @lines;
 
 {
@@ -42,7 +86,7 @@ my @lines;
     @lines = <FILE>;
     close FILE;
 }
-print STDERR "Lines: ".@lines."\n";
+# print STDERR "Lines read: ".@lines."\n";
 
 my @section_list;
 
@@ -122,7 +166,7 @@ $sections{"schema"} = $schemasec;
 ## We now have all the sections, print them
 ## in the order they appeared.
 
-open OUT, $outfile or die "Unable to open $outfile: $!";
+open (OUT, ">$outfile") or die "Unable to open $outfile: $!";
 foreach my $key (@section_list) {
     print OUT "%% SECTION ".$key."\n";
     print OUT $sections{$key};
