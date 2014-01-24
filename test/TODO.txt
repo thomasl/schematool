@@ -1,0 +1,20 @@
+%% schematool:create_schema tests
+%% - no nodes specified
+%% - own node specified
+%% - multiple nodes specified
+%% - error: repeated nodes specified
+%% - error: multiple table defs
+%% - error: bad table options passed
+
+%% schematool diff tests:
+%% - nodes added
+%% - nodes deleted
+%% - nodes added and deleted
+%% - nodes added and deleted, no overlap (does this work?)
+%% - tables added
+%% - tables deleted
+%% - tables changed
+%% - tables added & deleted
+%% - tables added & deleted & changed
+%% - tables renamed [no notation for this]
+
