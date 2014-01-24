@@ -22,6 +22,11 @@
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+-spec schematool:module(module()) -> any().
+-spec schematool:create_schema(schema()) -> any().
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
 -export_type([schema/0]).
 
 -type schema() :: [schema_item()].   %% The main type of interest
