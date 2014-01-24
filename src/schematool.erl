@@ -22,13 +22,15 @@
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+-export_type([schema/0]).
+
 -type schema() :: [schema_item()].   %% The main type of interest
 
 -type schema_item() :: 
      {nodes, [node_name()]}
    | {table, table_name(), [table_opt()]}.
 
--type node_name() :: atom().   %% is there a node name type?
+-type node_name() :: node().
 -type table_name() :: atom().
 -type table_opt() :: term().   %% could be more precise
 
