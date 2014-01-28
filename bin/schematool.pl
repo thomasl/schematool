@@ -14,6 +14,11 @@ use File::Basename qw(basename);
 use strict;
 use warnings;
 
+## schemamod must be in path, ie this
+## directory must be in your path
+
+my $SCHEMAMOD_PL = "schemamod.pl";
+
 ## Mangle options
 
 my $schemafile;
@@ -36,15 +41,15 @@ GetOptions(
 
 sub usage() {
     print STDERR 
-	"usage: schematool [options]\n"
-	" --schemafile file.schema\n"
-	" [--schemamod modname]\n"
-	" --outfile file.erl\n"
-	" [--etmp tmpdir]\n"
-	" [--ebin beam output dir]\n"
-	" [--einc erlc include dir]\n"
-	" [--epath erlc extra path]\n"
-	;
+	"usage: schematool [options]\n".
+	" --schemafile file.schema\n".
+	" [--schemamod modname]\n".
+	" --outfile file.erl\n".
+	" [--etmp tmpdir]\n".
+	" [--ebin beam output dir]\n".
+	" [--einc erlc include dir]\n".
+	" [--epath erlc extra path]\n".
+	"";
 }
 
 unless ($schemafile) {
@@ -94,7 +99,7 @@ print STDERR "Note: No escaping of arguments done; spaces etc may cause trouble\
 ## - Seems to work at the moment
 
 my $cmd;
-$cmd = "perl ./bin/schemamod.pl --schemafile $schemafile --outfile $outf --module $schemamod --force";
+$cmd = "perl $SCHEMAMOD_PL --schemafile $schemafile --outfile $outf --module $schemamod --force";
 print STDERR "$cmd\n";
 system($cmd) 
 #    or die "schemamod failed: $!"
