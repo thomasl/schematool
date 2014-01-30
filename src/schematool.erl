@@ -43,9 +43,11 @@
 
 create_schema(M) ->
     Schema = module(M),
+    io:format("Schema: ~p\n", [Schema]),
+    io:format("Creating ...\n", []),
     cr_schema(Schema).
 
-module([M]) ->
+module([M]) when is_atom(M) ->
     %% (for use on command line)
     module(M);
 module(M) when is_atom(M) ->
@@ -71,10 +73,12 @@ module(M) when is_atom(M) ->
 %% UNFINISHED
 %% - no error checking, e.g., db already exists
 %% - maybe application:stop(mnesia) afterwards?
+%% - more printouts
 
 cr_schema(Schema) ->
     application:load(mnesia),
     Nodes = get_nodes(Schema),
+    io:format("- schemafor nodes ~p\n", [Nodes]),
     case lists:member(node(), Nodes) of
 	true ->
 	    case mnesia:create_schema(Nodes) of
@@ -87,7 +91,8 @@ cr_schema(Schema) ->
 		    lists:foreach(
 		      fun({table, Tab, Opts}) ->
 			      %% check return value
-			      mnesia:create_table(Tab, Opts);
+			      io:format("Create table ~p ~p-> ~p\n", 
+					[Tab, Opts, mnesia:create_table(Tab, Opts)]);
 			 (Other) ->
 			      %% skip the others
 			      ok
