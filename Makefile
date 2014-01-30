@@ -9,3 +9,5 @@ clean:
 	(cd examples; make clean)
 	(cd test; make clean)
 
+test:
+	(cd test ; make test)

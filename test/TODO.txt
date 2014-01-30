@@ -1,3 +1,15 @@
+%% End-to-end
+%% - compile successful schema examples
+%%   * generate erl
+%%   * compile erl
+%%   * create schema from generated module
+%% - likewise for migration (schema1 to schema2)
+%%   * schema1 -> schema1 (no change)
+%%   * schema1 -> schema2 ("upgrade")
+%%   * schema2 -> schema1 ("downgrade")
+%% - schema defs using helpers, make sure this works/compiles
+%% - fuzzing?
+
 %% schematool:create_schema tests
 %% - no nodes specified
 %% - own node specified
@@ -17,4 +29,47 @@
 %% - tables added & deleted
 %% - tables added & deleted & changed
 %% - tables renamed [no notation for this]
+%% - error: ...?
 
+%% schematool migration instructions
+%% - add nodes
+%% - delete nodes
+%% - add + remove nodes (with common core)
+%% - add + remove nodes (no common core)
+%% - error: no nodes
+%% - error: ?
+%%
+%% single table tests
+%% - change storage scheme (disc_copies, disc_only_copies, ram_copies)
+%% - change nodes
+%% - change storage scheme and nodes
+%% - change type
+%% - change record_name [see attributes too]
+%% - access_mode
+%% - load_order
+%% - majority
+%% - (local_content)
+%% - (storage_properties)
+%% - (SNMP)
+%% - attributes
+%%   * extend
+%%   * contract
+%%   * permute
+%%   * all of the above
+%% - add index
+%% - delete index
+%% - add and delete indexes
+%% - record transform functions
+%% - attribute transform functions
+%% - detect changes from default
+%% - error: ?
+%%
+%% Multiple tables
+%% - ... (extra beyond single-table?) ...
+%%
+%% Fragmented tables
+%% - add fragment
+%% - del fragment
+%% - non-frag to frag
+%% - frag to non-frag
+%% - ... (not sure) ...
