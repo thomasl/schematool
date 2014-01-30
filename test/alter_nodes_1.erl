@@ -45,5 +45,3 @@ sorted_diff(Old, New) ->
     io:format("A = ~p, R = ~p, D = ~p\n", [A, R, D]),
     {lists:sort(A), lists:sort(R), lists:sort(D)}.
 
-
-

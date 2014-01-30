@@ -27,6 +27,7 @@ BEHAVIOUR_SRC= \
 
 SCHEMATOOL_MODS= \
 	alter_nodes_1 \
+	alter_nodes_2 \
 	alter_table_1
 
 SCHEMATOOL_SRC := $(patsubst %, %.erl, $(SCHEMATOOL_MODS))

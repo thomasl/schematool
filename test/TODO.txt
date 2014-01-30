@@ -44,6 +44,9 @@
 %% - change nodes
 %% - change storage scheme and nodes
 %% - change type
+%%   * set -> bag, set -> ord_set
+%%   * ord_set -> bag, ord_set -> set
+%%   * bag -> set, baf -> ord_set
 %% - change record_name [see attributes too]
 %% - access_mode
 %% - load_order

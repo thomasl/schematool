@@ -14,6 +14,7 @@
 -export(
    [
     diff/2,
+    alter_nodes/1,
     alter_nodes/3
    ]).
 
@@ -34,10 +35,13 @@ diff(Old_lst, New_lst) ->
     Cut = sets:intersection(Old, New),
     Deleted = sets:subtract(Old, Cut),
     Added = sets:subtract(New, Cut),
-    {sets:to_list(Added), 
-     sets:to_list(Cut), 
-     sets:to_list(Deleted)
+    {to_list(Added), 
+     to_list(Cut), 
+     to_list(Deleted)
     }.
+
+to_list(Set) ->
+    lists:sort(sets:to_list(Set)).
 
 %% When altering the collection of nodes,
 %% we have a general scenario and a number
@@ -52,6 +56,13 @@ diff(Old_lst, New_lst) ->
 %%
 %% These return instructions for what to do
 %% (in the given order).
+
+%% (convenience)
+
+alter_nodes({Add, Rem, Del}) ->
+    alter_nodes(Add, Rem, Del).
+
+%%
 
 alter_nodes([], [], []) ->
     exit(no_nodes);
