@@ -34,7 +34,9 @@
 -module(schematool).
 -export(
    [module/1,
-    create_schema/1
+    create_schema/1,
+    diff/2,
+    diff_modules/2
    ]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
