@@ -12,8 +12,8 @@
 
 -import(schematool_nodes, 
 	[diff/2,
-	 alter_nodes/1,
-	 alter_nodes/3
+	 alter_nodes/2,
+	 alter_nodes/4
 	]).
 
 -define(nodes, [a@localhost, b@localhost, c@localhost]).
@@ -21,10 +21,9 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%
 %% UNFINISHED
-%% - we're matching concrete data here, but SHOULD match relations
-%%   such as "all of the following nodes are expanded before any
-%%   replication and not after any replication"
-%%   * we get unsorted lists as output, which causes spurious failures
+%% - output data have changed, so these tests must be updated!
+%% - shouldn't match concrete data but PROPERTIES of output
+%%   * how to do that?
 
 nochange_test() ->
     Old = ?nodes,
@@ -60,5 +59,6 @@ add_del_node_nocommon_test() ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 diff_and_alter(Old, New) ->
-    alter_nodes(diff(Old, New)).
+    Schema = undef_schema_module, 
+    alter_nodes(Schema, diff(Old, New)).
 

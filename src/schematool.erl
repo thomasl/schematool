@@ -10,9 +10,26 @@
 %%
 %% Update the schema() type family appropriately when
 %% adding new options.
+%%
+%% Architectural notes:
+%% - we should PERHAPS have a god-node containing
+%%   the schema and all related info (e.g., all versions), 
+%%   then propagate the create/migrate info to all work-nodes
+%%   * we then avoid trouble with doing dangerous ops
+%%     like mnesia:delete_schema on possibly every node
+%% - schematool should be configurable to do a BACKUP
+%%   before any dangerous/data-lossy migration
+%%   * how to detect this? [mark ops as dangerous?]
+%%   * how to do this?
+%%     - how to be efficient about it?
+%%   * where to insert the backup operation?
+%%   * where to configure that backup is desired?
+%%   * how to trigger rollback to backup?
+%%   * how to implement full rollback?
+%%   (* can/should we use checkpoints instead?)
 
 %% STATUS
-%% - early
+%% - still early days
 
 -module(schematool).
 -export(
@@ -113,47 +130,40 @@ cr_schema(Schema) ->
 %%
 
 get_nodes(Schema) ->
-    get_value(nodes, Schema, [node()]).
+    proplists:get_value(nodes, Schema, [node()]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Diff schema1 and schema2 (old vs new). Foundation for
 %% performing upgrade/downgrade/...
 %% 
-%% Returns the following [currently!]:
-%% - nodes added/deleted in schema2
-%% - tables added/deleted/changed (new and old) in schema2
-%% 
-%% Should also allow
-%% - RENAMING of tables in some reasonable way
-%% - (nice feature: rename/manipulate record fields)
-%% - accessors? (not implemented yet)
-%%
-%% NOTE: This MUST be in sync with the schema spec format.
-%% 
-%% NB: The algorithms used are very basic, one of them is
-%%  O(N*M). Since N and M are assumed to be small, this is
-%%  okay. If not, rewrite to get better ordo (e.g., store
-%%  tables in dict/hash, etc.)
-%%
-%% NB: current format just returns UNCHANGED keys, which is good
-%% for testing.
+%% UNFINISHED
+%% - output needs to be massaged
+
+%% diff of schemas in modules M0, M1
+
+diff_modules(M0, M1) ->
+    S0 = M0:schema(),
+    S1 = M1:schema(),
+    diff(S0, S1).
+
+%% diff of schemas S0, S1
 
 diff(S0, S1) ->
     N = nodediff(S0, S1),
     Ts = tablediff(S0, S1),
     cons(nodes, N, cons(tables, Ts, [])).
 
-%% (assume nodes do not have repeated elements, maybe we should
-%% use sets or uniquify?)
+%% Diff of nodes in schemas S0, S1
 
 nodediff(S0, S1) ->
     N0 = get_nodes(S0),
     N1 = get_nodes(S1),
-    Added = N1 -- N0,
-    Deleted = N0 -- N1,
-    cons(added, Added, cons(deleted, Deleted, [])).
+    schematool_nodes:diff(N0, N1).
 
 %% Collect tables that have been added, deleted or changed.
+%%
+%% UNFINISHED
+%% - not sure if ordering is good
 
 tablediff(S0, S1) ->
     %% Select tables from schema def, since it's a list
@@ -165,7 +175,9 @@ tablediff(S0, S1) ->
     Deleted = [ Table || Table <- S0,
 		       not table_defined(table_name(Table), S1) ],
     Changed = tables_changed(T0, T1),
-    cons(added, Added, cons(deleted, Deleted, cons(changed, Changed, []))).
+    [ {schematool_helper, create_table, [Add]} || Add <- Added ] ++
+    [ {schematool_helper, delete_table, [Del]} || Del <- Deleted ] ++
+    [ schematool_table:alter_table(Chg) || Chg <- Changed ].
 
 %% Lookup the tables found in both lists of tables and check
 %% if their options field differ. If so, return both. [Added
@@ -173,16 +185,16 @@ tablediff(S0, S1) ->
 %%
 %% Non-table definitions are skipped.
 
-tables_changed([{table, Name, OldOpts}|Ts], Tabs) ->
-    case table_def(Name, Tabs) of
+tables_changed([{table, TabName, OldOpts}|Ts], Tabs) ->
+    case table_def(TabName, Tabs) of
 	not_found ->
 	    tables_changed(Ts, Tabs);
-	{found, {table, _Name, NewOpts}} ->
+	{found, {table, _TabName, NewOpts}} ->
 	    if
 		OldOpts == NewOpts ->
 		    tables_changed(Ts, Tabs);
 		true ->
-		    [{table_diff, Name, OldOpts, NewOpts}|tables_changed(Ts, Tabs)]
+		    [{TabName, OldOpts, NewOpts}|tables_changed(Ts, Tabs)]
 	    end
     end;
 tables_changed([_Other|Ts], Tabs) ->
@@ -227,17 +239,4 @@ cons(Key, [], Rest) ->
     Rest;
 cons(Key, Val, Rest) ->
     [{Key, Val}|Rest].
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%
-%% UNFINISHED
-%% - (Should Dflt be a closure, evaluated only if not found?
-%%   If so, return Dflt() instead of Dflt.)
-
-get_value(Key, [{Key, Val}|Xs], Dflt) ->
-    Val;
-get_value(Key, [_|Xs], Dflt) ->
-    get_value(Key, Xs, Dflt);
-get_value(Key, [], Dflt) ->
-    Dflt.
 

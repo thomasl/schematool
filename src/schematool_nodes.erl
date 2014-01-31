@@ -14,8 +14,8 @@
 -export(
    [
     diff/2,
-    alter_nodes/1,
-    alter_nodes/3
+    alter_nodes/2,
+    alter_nodes/4
    ]).
 
 -define(dbg(Str, Xs), io:format(Str, Xs)).
@@ -43,9 +43,6 @@ diff(Old_lst, New_lst) ->
 to_list(Set) ->
     lists:sort(sets:to_list(Set)).
 
-%% When altering the collection of nodes,
-%% we have a general scenario and a number
-%% of simplifications.
 %%
 %% -1. malformed: add,del,rem all empty
 %% 0. unchanged. [common enough]
@@ -59,34 +56,54 @@ to_list(Set) ->
 
 %% (convenience)
 
-alter_nodes({Add, Rem, Del}) ->
-    alter_nodes(Add, Rem, Del).
+alter_nodes(Schema, {Add, Rem, Del}) ->
+    alter_nodes(Schema, Add, Rem, Del).
 
+%% The following implements the instructions to be performed
+%% when doing the migrations. We have a number of special cases,
+%% with the most complex one being when the old and new nodes
+%% do not overlap (called the nocommon case).
 %%
+%% Migration of nodes for the nocommon case:
+%% Option 1: 
+%% - create new nodes with old schema
+%% - add new nodes as table copies
+%% - migrate all the tables
+%% - delete the old nodes
+%%
+%% Option 2:
+%% - create new nodes with new schema
+%% - migrate old nodes to new schema
+%% - add new nodes as table copies
+%% - delete old nodes
+%% 
+%% UNFINISHED
+%% - do we need to pass the old schema too for migrations?
 
-alter_nodes([], [], []) ->
+alter_nodes(_NewSchema, [], [], []) ->
     exit(no_nodes);
-alter_nodes([], Remaining, []) when Remaining =/= [] ->
+alter_nodes(NewSchema, [], Remaining, []) when Remaining =/= [] ->
     %% unchanged, do nothing
-    [];
-alter_nodes(Added, Remaining, []) when Remaining =/= []  ->
+    [migrate_nodes(NewSchema, Remaining)];
+alter_nodes(Schema, Added, Remaining, []) when Remaining =/= []  ->
     %% add new nodes, then replicate
-    [{expand, Added},
-     replicate];
-alter_nodes([], Remaining, Deleted) when Remaining =/= []  ->
+    [create_nodes(Schema, Added),
+     migrate_nodes(Schema, Remaining)];
+alter_nodes(Schema, [], Remaining, Deleted) when Remaining =/= []  ->
     %% old nodes deleted
-    [{contract, Deleted}];
-alter_nodes(Added, Remaining, Deleted)  when Remaining =/= [] ->
+    [delete_nodes(Deleted),
+     migrate_nodes(Schema, Remaining)];
+alter_nodes(Schema, Added, Remaining, Deleted)  when Remaining =/= [] ->
     %% switch out some nodes and switch in others
     %% - since there is a core of remaining nodes, we can
     %%   get rid of the deleted nodes first
     %% 
     %% migrating: first delete dead copies, then add new copies
     %% and replicate from the remaining
-    [{contract, Deleted},
-     {expand, Added},
-     replicate];
-alter_nodes(Added, [], Deleted) ->
+    [delete_nodes(Deleted),
+     create_nodes(Schema, Added),
+     migrate_nodes(Schema, Remaining)];
+alter_nodes(Schema, Added, [], Deleted) ->
     %% migrate between non-overlapping sets of nodes; we
     %% need to replicate before abandoning the old nodes
     %%
@@ -96,21 +113,28 @@ alter_nodes(Added, [], Deleted) ->
     %% NB: might be enough to add one node, replicate to that
     %%  then delete old nodes, then add the rest
     %%  - not sure about trade off?
-    [{expand, Added},
-     replicate,
-     {contract, Deleted}].
+    %%
+    [create_nodes(Schema, Added),
+     migrate_nodes(Schema, Added),
+     delete_nodes(Deleted)];
+alter_nodes(Schema, Added, Remaining, Deleted) ->
+    exit({unhandled_case, {alter_nodes, Schema, Added, Remaining, Deleted}}).
 
-execute_instructions(Instrs) ->
-    lists:foreach(
-      fun({expand, Nodes}) ->
-	      io:format("NYI: add nodes ~p\n", [Nodes]);
-	 ({contract, Nodes}) ->
-	      io:format("NYI: delete nodes ~p\n", [Nodes]);
-	 (replicate) ->
-	      io:format("NYI: replicate tables everywhere\n", []);
-	 (Other) ->
-	      ok
-      end,
-      Instrs).
+%% Create schema on nodes (Schema is the generated schema module).
 
-    
+create_nodes(Schema, Ns) ->
+    [ {schematool_helper, create_schema, [Schema, N]} || N <- Ns ].
+
+%% Delete schema on nodes Ns
+%%
+%% UNFINISHED
+%% - trigger system backup before this is done? (only on the nodes?)
+
+delete_nodes(Ns) ->
+    [ {schematool_helper, delete_schema, [N]} || N <- Ns ].
+
+%% UNFINISHED
+%% - just a placeholder at the moment, what needs to be done?
+
+migrate_nodes(NewSchema, Ns) ->
+    [{error, {{schematool_helper, migrate_nodes, [NewSchema, Ns]}, nyi}}].

@@ -8,7 +8,8 @@
 
 -import(schematool_nodes, 
 	[diff/2,
-	 alter_nodes/3
+	 alter_nodes/2,
+	 alter_nodes/4
 	]).
 
 -define(nodes, [a@localhost, b@localhost, c@localhost]).

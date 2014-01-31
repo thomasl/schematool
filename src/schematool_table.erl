@@ -7,10 +7,13 @@
 %% given the old and new definitions.
 %%
 %% UNFINISHED
-%% - fragmented tables NOT HANDLED
-%% - a couple of options NOT HANDLED
-%% - multiple storage types for a tables NOT HANDLED
-%% - run the generated instructions
+%% 1/ collect ALL of the changes in one call
+%%    (rec name, attrs, etc)
+%% 2/ handle fragmented tables
+%% 3/ check what happens with multiple storage types
+%%    for a table (create schema & migrate)
+%% 3/ when this looks okay, I think we can start debugging
+%%    (and maybe running some migrations)
 
 -module(schematool_table).
 -export(
@@ -42,11 +45,22 @@
 %%
 %% UNFINISHED
 
+%% - should we thread the ActsN properly?
+%% - should they be sorted according to dependences?
+%%   (if so on a higher level, with node changes)
+
+alter_table({Tab, Old_opts, New_opts}=TabDiff) ->
+    Acts0 = alter_table_opts(TabDiff),
+    Acts1 = alter_table_properties(Tab, Old_opts, New_opts, []),
+    Acts2 = alter_storage_type(Tab, Old_opts, New_opts, []),
+    Acts3 = alter_indexes(Tab, Old_opts, New_opts),
+    [Acts0, Acts1, Acts2, Acts3].
+
 %% Returns a list of instructions
 %% - perhaps with a priority so we can sort them
 %%   into "good order"?
 
-alter_table({Tab, Old_opts, New_opts}) ->
+alter_table_opts({Tab, Old_opts, New_opts}) ->
     lists:foldr(
       fun({access_mode, Mode}, Actions) ->
 	      Old = get_value(access_mode, Old_opts, read_write),
