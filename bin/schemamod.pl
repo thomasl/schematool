@@ -73,7 +73,8 @@ unless ($outfile) {
 ##
 ## If not given, we derive the vsn from the git log (when available)
 
-my $outfile_vsn = basename($outfile, ".erl");
+# my $outfile_vsn = basename($outfile, ".erl");
+my ($outfile_vsn, $outdir) = fileparse($outfile, ".erl");
 unless ($vsn) {
     my @gitlog = `git log -1 --abbrev-commit | grep commit`;
     my $gitline = @gitlog[0];
@@ -88,6 +89,7 @@ unless ($vsn) {
 	die "No version given (--vsn [a-zA-Z0-9_]+)";
     };
     print STDERR "No explicit version given, using $gitvsn from git\n";
+    $vsn = $gitvsn;
 }
 
 unless ($module) {
@@ -96,7 +98,7 @@ unless ($module) {
 }
 
 my $vsn_module = $module."_".$vsn;
-my $outfile_vsn = $vsn_module.".erl";
+my $outfile_vsn = $outdir.$vsn_module.".erl";
 
 unless (-f $file) {
     die "Schema file $file does not exist";
@@ -207,9 +209,16 @@ $sections{"schema"} = $schemasec;
 ## Print the wrapper module
 ##
 ## This is basically just a string
+
+use POSIX;
+my $datetime = strftime("%Y-%m-%d %H:%M:%S\n", localtime(time));
+
 open (OUT, ">$outfile") or die "Unable to open $outfile: $!";
 print OUT <<WRAPPER;
 %% -*- Erlang -*-
+%%
+%% Auto-generated $datetime
+
 -module($module).
 -export([schema/0]).
 
