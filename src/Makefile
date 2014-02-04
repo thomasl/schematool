@@ -5,24 +5,17 @@
 ##
 ## We assume gnumake here
 ## 
-## See ERLC_OPTS for some choices:
-## - debug_info
-## - export_all
-## - uses smart_exceptions parse transform
-##
-## UNFINISHED
-## (The smart exception usage is pretty clunky. As
-## written, you'll have to install it in the right
-## place.)
+## Note: the 'clean' target expands $(SCHEMATOOL_OBJS) to a very long
+##  line, which may cause a shell failure if the number of object
+##  files grows large (= too long string). If so, go back to the
+##  imprecise old rule "rm -f ../ebin/*.beam"
 
 SCHEMATOOL_INC_DIR=../include
 SCHEMATOOL_SRC_DIR=../src
 
-## UNFINISHED
-## - weird paths, should be fixed
+## smart_exceptions is a git submodule
 
-BASEDIR=$(HOME)/git
-UTIL_DIR=$(BASEDIR)/smart_exceptions/devel/ebin
+UTIL_DIR=../smart_exceptions/devel/ebin
 
 # NB: We currently export everything, to simplify debugging
 
@@ -92,7 +85,7 @@ clean: clean_bin
 clean_bin: clean_beam clean_app
 
 clean_beam:
-	rm -f ../ebin/*.beam
+	rm -f $(SCHEMATOOL_OBJS)
 
 clean_app:
 	rm -f ../ebin/*.app

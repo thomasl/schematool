@@ -59,8 +59,8 @@ test: $(SCHEMATOOL_TESTS)
 clean: clean_beam clean_test
 
 clean_test:
-	rm *.TOUCH
+	rm -f *.TOUCH
 
 clean_beam:
-	rm $(SCHEMATOOL_OBJS)
+	rm -f $(SCHEMATOOL_OBJS)
 
