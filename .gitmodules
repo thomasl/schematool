@@ -1,0 +1,3 @@
+[submodule "smart_exceptions"]
+	path = smart_exceptions
+	url = git@github.com:thomasl/smart_exceptions.git

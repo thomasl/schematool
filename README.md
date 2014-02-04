@@ -9,6 +9,22 @@ manage the schema as a data structure.
 
 STATUS: tool chain unfinished.
 
+Installation
+----------
+
+Uses git submodules (git version > 1.8.2) to provide smart_exceptions.
+Here is what you have to do to clone:
+
+    git clone git@github.com:thomasl/schematool.git --recursive
+
+or possibly
+
+   git clone git@github.com:thomasl/schematool.git
+   git submodule update --init --recursive
+
+(Note: submodules are a bit new to me, so better approaches
+are welcome.)
+
 Usage
 ----------
 
