@@ -27,6 +27,15 @@
 %%   * how to trigger rollback to backup?
 %%   * how to implement full rollback?
 %%   (* can/should we use checkpoints instead?)
+%%
+%% Here's how it PROBABLY should be:
+%% - store the current schema in mnesia (table:schematool_schema)
+%%   * as "datetime -> schemablob" + 'current'
+%% - on an upgrade, diff the new and current schema to get
+%%   migration instructions
+%%   * script should detect init vs upgrade
+%% - generate upgrade instructions
+%%   * later on: run them automatically
 
 %% STATUS
 %% - still early days
@@ -97,36 +106,42 @@ module(M) when is_atom(M) ->
 cr_schema(Schema) ->
     application:load(mnesia),
     Nodes = get_nodes(Schema),
-    io:format("- schemafor nodes ~p\n", [Nodes]),
-    case lists:member(node(), Nodes) of
+    if
+	Nodes == [] ->
+	    io:format("No nodes found, stopping\n",[]);
 	true ->
-	    case mnesia:create_schema(Nodes) of
-		{error, Rsn} ->
-		    io:format("Unable to create fresh schema ~p: ~p\n", [Nodes, Rsn]);
-		ok ->
-		    %% Now create the tables and do whatever other setup
-		    %% is needed
-		    application:start(mnesia),
-		    lists:foreach(
-		      fun({table, Tab, Opts}) ->
-			      %% check return value
-			      io:format("Create table ~p ~p-> ~p\n", 
-					[Tab, Opts, mnesia:create_table(Tab, Opts)]);
-			 (Other) ->
-			      %% skip the others
-			      ok
-		      end,
-		      Schema),
-		    %% mnesia:info(), %% show status
-		    %% application:stop(mnesia),
+	    io:format("- schema for nodes ~p\n", [Nodes]),
+	    case lists:member(node(), Nodes) of
+		true ->
+		    case mnesia:create_schema(Nodes) of
+			{error, Rsn} ->
+			    io:format("Unable to create fresh schema ~p: ~p\n", [Nodes, Rsn]);
+			ok ->
+			    %% Now create the tables and do whatever other setup
+			    %% is needed
+			    application:start(mnesia),
+			    create_schematool_info(Nodes, Schema),
+			    lists:foreach(
+			      fun({table, Tab, Opts}) ->
+				      %% check return value
+				      io:format("Create table ~p ~p-> ~p\n", 
+						[Tab, Opts, mnesia:create_table(Tab, Opts)]);
+				 (Other) ->
+				      %% skip the others
+				      ok
+			      end,
+			      Schema),
+			    %% mnesia:info(), %% show status
+			    %% application:stop(mnesia),
+			    ok
+		    end;
+		false ->
+		    %% Current node is NOT part of schema,
+		    %% do not create tables
+		    %% - warning or log this? verbose option, could
+		    %%   be annoying to run in scripts otherwise
 		    ok
-	    end;
-	false ->
-	    %% Current node is NOT part of schema,
-	    %% do not create tables
-	    %% - warning or log this? verbose option, could
-	    %%   be annoying to run in scripts otherwise
-	    ok
+	    end
     end.
 
 %%
@@ -134,6 +149,40 @@ cr_schema(Schema) ->
 get_nodes(Schema) ->
     proplists:get_value(nodes, Schema, [node()]).
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%
+%% UNFINISHED
+%% - get latest schema
+%% - retire old versions
+%% - use erlang:now() instead of datetime?
+
+-define(schematool_info, schematool_info).
+-record(schematool_info, {datetime, schema}).
+
+create_schematool_info(Nodes, Schema) ->
+    Datetime = calendar:universal_time(),
+    create_schematool_info(Datetime, Nodes, Schema).
+
+%% Create and store the relevant schematool info for later use.
+%%
+%% - we store the info on all nodes, what the hell
+%% - currently use load datetime as key
+
+create_schematool_info(Datetime, Nodes, Schema) ->
+    io:format("Create schematool table -> ~p\n", 
+	      [mnesia:create_table(?schematool_info, 
+				   [set, 
+				    {disc_copies, Nodes},
+				    {attributes, 
+				     record_info(fields, schematool_info)}])]),
+    io:format("Write schema info -> ~p\n",
+	      [mnesia:transaction(
+		 fun() ->
+			 mnesia:write(#schematool_info{datetime=Datetime, 
+						       schema=Schema})
+		 end)
+	       ]).
+						  
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Diff schema1 and schema2 (old vs new). Foundation for
 %% performing upgrade/downgrade/...
