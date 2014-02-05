@@ -4,20 +4,22 @@
 #
 # UNFINISHED
 # - just generates+compiles schema module
-# - module probably should have VERSIONED name
-#   * foundation of schema diffs (in erlang ctx)
-# - escape/quote options values?
+# - escape/quote options values? e.g., secure paths with weird chars
 # - option 'einc' is not pretty
 
 use Getopt::Long;
-use File::Basename qw(basename);
+use File::Basename qw(basename fileparse);
+use Cwd qw(abs_path);
 use strict;
 use warnings;
 
-## schemamod must be in path, ie this
-## directory must be in your path
+## (There has to be a better way to do this. Motivation: the
+## schemamod.pl script is found in the same dir as this script; we
+## need to run it even when we are in some other dir and it's not in
+## the path.)
 
-my $SCHEMAMOD_PL = "schemamod.pl";
+my ($scriptfile, $SCHEMATOOL_BIN) = fileparse(abs_path($0));
+my $SCHEMAMOD_PL = $SCHEMATOOL_BIN."schemamod.pl";
 
 ## Mangle options
 
@@ -101,15 +103,19 @@ print STDERR "Note: No escaping of arguments done; spaces etc may cause trouble\
 my $cmd;
 $cmd = "perl $SCHEMAMOD_PL --schemafile $schemafile --outfile $outf --module $schemamod --force";
 print STDERR "$cmd\n";
-system($cmd) 
-#    or die "schemamod failed: $!"
-;
+system($cmd);
+
+my @VSNFILE = `perl $SCHEMAMOD_PL --schemafile $schemafile --vsnfile --outfile $outf`;
+my $vsnfile = $VSNFILE[0];
+print STDERR "vsn file is $vsnfile\n";
 
 $cmd = "erlc -I $einc -pa $epath -o $ebin $outf";
 print STDERR "$cmd\n";
-system($cmd) 
-#    or die "erlc failed: $!"
-;
+system($cmd) ;
+
+$cmd = "erlc -I $einc -pa $epath -o $ebin $vsnfile";
+print STDERR "$cmd\n";
+system($cmd) ;
 
 ## At this point, you can run the rest in
 ## erlang, as

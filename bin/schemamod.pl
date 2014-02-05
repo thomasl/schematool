@@ -4,19 +4,21 @@
 # but erlang's epp only works on modules (because it's a joke, see;
 # Robert Virding, e.g., 
 # http://erlang.org/pipermail/erlang-questions/2006-October/023409.html )
-# ... so we need to generate a module
+# ... so we need to generate a module to run epp easily
 #
 # Easiest way to do this is to wrap the info in
 # a simple definition template.
 #
 # And to do that, we use ... perl. Yay!
 
-## Usage:
-##  perl schemamod.pl example.schema
+## Usage: see usage() below
 ##
+## Base usage:
 ## Writes module to example_schema.erl
 ## - note that if there are errors in example.schema,
 ##   the generated module will have errors too
+##
+## 
 
 ########################################
 ## We define the schema as a template
@@ -49,14 +51,32 @@ my $outfile;
 my $module;
 my $vsn;
 my $force_overwrite = 0;
+my $print_vsnfile = 0;
 
 GetOptions(
     'schemafile=s' => \$file,
     'outfile=s' => \$outfile,
     'module=s' => \$module,
     'vsn=s' => \$vsn,
-    'force' => \$force_overwrite
+    'force' => \$force_overwrite,
+    'vsnfile' => \$print_vsnfile
     );
+
+sub usage() {
+    print STDERR
+	"Usage:\n".
+	"$0 --schemafile file.schema ...\n".
+	"  --outfile file\n".
+	"  --module modname\n".
+	"  --vsn string\n".
+	"  --force\n".
+	"to generate the schema code, or\n".
+	"$0 --schemafile file.schema --outfile file --vsnfile\n".
+	"to get the implicit version file name, if needed\n".
+	"";
+
+    exit(1);
+}
 
 unless ($file) {
     die "No schema file given (--schemafile file.schema)";
@@ -88,7 +108,6 @@ unless ($vsn) {
 	## no commit found, die
 	die "No version given (--vsn [a-zA-Z0-9_]+)";
     };
-    print STDERR "No explicit version given, using $gitvsn from git\n";
     $vsn = $gitvsn;
 }
 
@@ -99,6 +118,17 @@ unless ($module) {
 
 my $vsn_module = $module."_".$vsn;
 my $outfile_vsn = $outdir.$vsn_module.".erl";
+
+## This is used when the enclosing script does not pass
+## a --vsn value, we then emit the name we used
+##
+## (Vulnerable to race conditions in repo, so a better
+## solution would be nice.)
+
+if ($print_vsnfile) {
+    print $outfile_vsn."\n";
+    exit 0;
+}
 
 unless (-f $file) {
     die "Schema file $file does not exist";
@@ -183,7 +213,7 @@ if ($num_lines > 0) {
 my $prologue = $sections{"prologue"};
 $prologue = 
     $prologue.
-    "\n-module($module).".
+    "\n-module($vsn_module).".
     "\n-export([schema/0]).".
     "\n\n";
 
