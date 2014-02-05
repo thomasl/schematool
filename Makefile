@@ -1,18 +1,18 @@
 
 ## Note: smart_exceptions is a submodule
+##
+## Note: is there some builtin way to invoke make in each of the listed subdirs?
+##  (earlier used (cd subdir ; make all) and so on)
 
 all: 
-	(cd smart_exceptions/devel ; make all)
-	(cd src; make all)
-	(cd examples; make all)
-	(cd test; make all)
+	make all -C smart_exceptions/devel
+	make all -C src/
+	make all -C test/
 
 clean:
-	(cd smart_exceptions/devel ; make clean)
-	(cd src; make clean)
-	(cd examples; make clean)
-	(cd test; make clean)
+	make clean -C smart_exceptions/devel
+	make clean -C src/
+	make clean -C test/
 
 test:
-	(cd smart_exceptions/devel ; make test)
-	(cd test ; make test)
+	make -C smart_exceptions/devel test/ MAKEFLAGS="test""
