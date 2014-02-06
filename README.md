@@ -28,7 +28,10 @@ are welcome.)
 Usage
 ----------
 
-The schema file must look like this:
+Write a schema file, then run a script to create the schema (including
+tables, etc).
+
+First, the schema file must look like this:
 
     ...
     %%=preamble
@@ -44,19 +47,32 @@ definition between releases, you can break these rules.)
 - All attributes such as include, include_lib, record and
 macros MUST be in the 'preamble' section. 
 - The schema definition MUST be in the 'schema' section.
+- As a convention, use file extension .schema.
 
-Collateral
+Second, assuming that the path to the schematool git directory
+is $SCHEMATOOL, create the schema as follows:
+
+    $ perl $SCHEMATOOL/bin/schematool.pl --schemafile test.schema --einc . --ebin ../ebin
+
+This creates a compiled schema module ../ebin/test_schema.beam (along with a "submodule" in the
+same directory, which can be ignored). Next create the schema:
+
+    $ perl $SCHEMATOOL/bin/create-schema.pl --schema myschema --node a@localhost
+
+This should create the schema and mnesia tables needed. Start using the node:
+
+    $ erl -pa ../ebin -name a@localhost
+    ...
+    1> mnesia:start().
+    2> mnesia:info().
+
+If your schema is using multiple nodes, you need to create it on all the nodes, start all the
+nodes, and so on.
+
+Future Extensions
 ----------
 
-This will (after some thinking) generate a number of
-scripts and erlang modules.
-
-- erlang schema definition module
-- script to initialize schema
-
-Extensions
-----------
-
+- schema/database migration
 - autodefine accessors that utilize indexes, etc.
 - define upgrade path for schema from vsn A to vsn B
 - also define downgrade path back from B to A
@@ -84,6 +100,7 @@ Scripts
 ==========
 
 - bin/schemamod.pl: given schema file, generate erlang schema module
+- bin/create-schema.pl: given erlang schema module, create schema and tables
 - src/*.erl: erlang files to further process the schema
 - examples/*: usage examples (NB: need more work)
 - test/*: tests (NB: empty at time of writing)

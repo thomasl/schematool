@@ -68,6 +68,21 @@
 -type table_opt() :: term().   %% could be more precise
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%
+%% Typical usage:
+%% $ (generate schemamod using schematool)
+%% $ $SCHEMATOOL_BIN/create-schema.pl --schema foo --node a@localhost 
+%%
+%% where
+%%   foo is usually a module (name) created by schematool
+%%
+%% After creating the schema, start the node with the given nodename:
+%%
+%% $ erl -name a@localhost
+%%
+%% (+ add your other erlang options of course)
+%%
+%% Note that we only use long names, -sname verboten.
 
 create_schema(M) ->
     Schema = module(M),
@@ -76,7 +91,7 @@ create_schema(M) ->
     cr_schema(Schema).
 
 module([M]) when is_atom(M) ->
-    %% (for use on command line)
+    %% (when used on command line)
     module(M);
 module(M) when is_atom(M) ->
    case catch M:schema() of
@@ -131,7 +146,7 @@ cr_schema(Schema) ->
 				      ok
 			      end,
 			      Schema),
-			    %% mnesia:info(), %% show status
+			    mnesia:info(), %% show status, a bit messy
 			    %% application:stop(mnesia),
 			    ok
 		    end;
@@ -140,6 +155,7 @@ cr_schema(Schema) ->
 		    %% do not create tables
 		    %% - warning or log this? verbose option, could
 		    %%   be annoying to run in scripts otherwise
+		    io:format("- current node ~p is not among mnesia nodes ~p, stop\n", [node(), Nodes]),
 		    ok
 	    end
     end.
@@ -150,11 +166,15 @@ get_nodes(Schema) ->
     proplists:get_value(nodes, Schema, [node()]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Store the current and previous schema versions.
+%%
+%% The key is {{YYYY, MM, DD}, {H, M, S}}.
 %%
 %% UNFINISHED
-%% - get latest schema
-%% - retire old versions
+%% - how do we UPGRADE/MIGRATE this hidden table?
+%% - retire old schema versions
 %% - use erlang:now() instead of datetime?
+%%   + store datetime as readable string/binary field
 
 -define(schematool_info, schematool_info).
 -record(schematool_info, {datetime, schema}).
@@ -164,25 +184,62 @@ create_schematool_info(Nodes, Schema) ->
     create_schematool_info(Datetime, Nodes, Schema).
 
 %% Create and store the relevant schematool info for later use.
-%%
-%% - we store the info on all nodes, what the hell
-%% - currently use load datetime as key
+%% Table is currently stored on all nodes.
 
 create_schematool_info(Datetime, Nodes, Schema) ->
     io:format("Create schematool table -> ~p\n", 
 	      [mnesia:create_table(?schematool_info, 
-				   [set, 
+				   [{type, ordered_set}, 
 				    {disc_copies, Nodes},
 				    {attributes, 
 				     record_info(fields, schematool_info)}])]),
     io:format("Write schema info -> ~p\n",
 	      [mnesia:transaction(
 		 fun() ->
-			 mnesia:write(#schematool_info{datetime=Datetime, 
-						       schema=Schema})
+			 add_schema_info(Datetime, Schema)
 		 end)
 	       ]).
-						  
+
+%% Return current schema definition (as a #schemainfo record),
+%% or an error.
+%%
+%% Can be used for diff purposes.
+
+current_schema() ->
+    atomic(
+      mnesia:transaction(
+	fun() ->
+		Key = mnesia:last(schematool_info),
+		[Rec] = mnesia:read(schematool_info, Key),
+		Rec
+	end)).
+
+%% - would be nice if we could retry txn as well
+
+atomic({atomic, Res}) ->
+    Res;
+atomic(Err) ->
+    Err.
+
+%% Add a new schema definition to schematool_info. Note
+%% that this is just one part of migrating the schema.
+%%
+%% We currently use Datetime as the key, but should
+%% perhaps use erlang:now() instead. The datetime
+%% should always be universaltime() to avoid timezone issues.
+%% (See add_schema_info/1.)
+%% 
+%% Perhaps: also store datetime as formatted binary field for
+%% convenience. E.g., <<"2014-01-01 23:59:59Z">> or something.
+
+add_schema_info(Schema) ->
+    Datetime = calendar:universal_time(),
+    add_schema_info(Datetime, Schema).
+
+add_schema_info(Datetime, Schema) ->
+    mnesia:write(#schematool_info{datetime=Datetime,
+				  schema=Schema}).
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Diff schema1 and schema2 (old vs new). Foundation for
 %% performing upgrade/downgrade/...
@@ -197,37 +254,78 @@ diff_modules(M0, M1) ->
     S1 = M1:schema(),
     diff(S0, S1).
 
+%% The following can only run in a node with
+%% active schematool (= mnesia + schematool_info table)
+
+diff_current(M1) ->
+    S1 = M1:schema(),
+    #schematool_info{schema=S0} = current_schema(),
+    diff(S0, S1).
+
 %% diff of schemas S0, S1
 
 diff(S0, S1) ->
     N = nodediff(S0, S1),
-    Ts = tablediff(S0, S1),
+    Ts = tablesdiff(S0, S1),
     cons(nodes, N, cons(tables, Ts, [])).
 
 %% Diff of nodes in schemas S0, S1
+%%
+%% Returns a list of operations at the moment.
+%%
+%% UNFINISHED
+%% - operations MUST NOT run without considering
+%%   the table migrations (which may need to be done intermixed with
+%%   node migrations)
+%%   * the common case of no changes will yield an empty list though
 
 nodediff(S0, S1) ->
     N0 = get_nodes(S0),
     N1 = get_nodes(S1),
-    schematool_nodes:diff(N0, N1).
+    diff_ops(N0, N1).
 
+%% Generate list of operations to add/delete nodes.
+%%
+%% NOTE: this is NOT YET SAFE to use. In order to migrate tables
+%% safely, we CANNOT add/delete nodes independently of the table
+%% operations!
+
+diff_ops(Old_lst, New_lst) ->
+    {Added, Remaining, Deleted} = schematool_nodes:diff(Old_lst, New_lst),
+    Ops =
+	[ {schematool_helper, add_node, [Node]} || Node <- Added ] ++
+	[ {schematool_helper, delete_node, [Node]} || Node <- Deleted ],
+    case Ops of
+	[] ->
+	    [];
+	_ ->
+	    [ {warning, <<"UNFINISHED - add/delete nodes must consider table operations">>} ] ++ Ops
+    end.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Collect tables that have been added, deleted or changed.
 %%
 %% UNFINISHED
 %% - not sure if ordering is good
+%% - the actions need to be revised
+%%   * create table with correct options
 
-tablediff(S0, S1) ->
+tablesdiff(S0, S1) ->
     %% Select tables from schema def, since it's a list
     %% at the moment, we just keep them
     T0 = S0,
     T1 = S1,
-    Added = [ Table || Table <- S1,
-		       not table_defined(table_name(Table), S0) ],
-    Deleted = [ Table || Table <- S0,
-		       not table_defined(table_name(Table), S1) ],
+    N0 = get_nodes(S0),
+    N1 = get_nodes(S1),
+    Added = [ Table || {table, Tab, _} = Table <- S1,
+		       not table_defined(Tab, S0) ],
+    Deleted = [ Tab || {table, Tab, _} <- S0,
+		       not table_defined(Tab, S1) ],
     Changed = tables_changed(T0, T1),
-    [ {schematool_helper, create_table, [Add]} || Add <- Added ] ++
-    [ {schematool_helper, delete_table, [Del]} || Del <- Deleted ] ++
+    [ {schematool_helper, create_table_all_nodes, [N1, Add]} 
+      || {table, Add, Opts} <- Added ] ++
+    [ {schematool_helper, delete_table_all_nodes, [N0, Del]} 
+      || Del <- Deleted ] ++
     [ schematool_table:alter_table(Chg) || Chg <- Changed ].
 
 %% Lookup the tables found in both lists of tables and check
@@ -268,10 +366,12 @@ table_def(Name0, [{table, Name, _Opts}=Tab|Xs]) ->
 	true ->
 	    table_def(Name0, Xs)
     end;
+table_def(Name, [_|Xs]) ->
+    table_def(Name, Xs);
 table_def(_Name, []) ->
     not_found.
 
-%% Is table Name0 defined in schema?
+%% Is table Name0 defined in schema? Returns bool()
 		
 table_defined(Name0, [{table, Name, _Opts}|Xs]) ->
     if
@@ -280,6 +380,8 @@ table_defined(Name0, [{table, Name, _Opts}|Xs]) ->
 	true ->
 	    table_defined(Name0, Xs)
     end;
+table_defined(Name, [_|Xs]) ->
+    table_defined(Name, Xs);
 table_defined(_Name, []) ->
     false.
 
