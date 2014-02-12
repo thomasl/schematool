@@ -26,8 +26,8 @@
 	 get_all_values/2
 	]).
 
--define(dbg(Str, Xs), io:format(Str, Xs)).
-%-define(dbg(Str, Xs), ok).
+%-define(dbg(Str, Xs), io:format(Str, Xs)).
+-define(dbg(Str, Xs), ok).
 
 %% Alter table so that it obeys New_opts
 %% starting from Old_opts.
@@ -44,14 +44,16 @@
 %% - perform change options in appropriate order
 %%
 %% UNFINISHED
-
-%% - should we thread the ActsN properly?
-%% - should they be sorted according to dependences?
-%%   (if so on a higher level, with node changes)
+%% - what is the correct order of actions?
+%%   e.g., change table opts before or after layout, etc
+%%   * correctness
+%%   * optimization (change layout in ram before
+%%     going to disc...? or other way around)
+%%   * should we specify dependences and sort?
 
 alter_table({Tab, Old_opts, New_opts}=TabDiff) ->
-    Acts0 = alter_table_opts(TabDiff),
-    Acts1 = alter_table_properties(Tab, Old_opts, New_opts, []),
+    Acts0 = alter_table_options(TabDiff),
+    Acts1 = alter_table_layout(Tab, Old_opts, New_opts, []),
     Acts2 = alter_storage_type(Tab, Old_opts, New_opts, []),
     Acts3 = alter_indexes(Tab, Old_opts, New_opts),
     [Acts0, Acts1, Acts2, Acts3].
@@ -60,7 +62,7 @@ alter_table({Tab, Old_opts, New_opts}=TabDiff) ->
 %% - perhaps with a priority so we can sort them
 %%   into "good order"?
 
-alter_table_opts({Tab, Old_opts, New_opts}) ->
+alter_table_options({Tab, Old_opts, New_opts}) ->
     lists:foldr(
       fun({access_mode, Mode}, Actions) ->
 	      Old = get_value(access_mode, Old_opts, read_write),
@@ -144,6 +146,8 @@ alter_table_opts({Tab, Old_opts, New_opts}) ->
 	      %%   if we need to do a full table copy to handle
 	      %%   such changes? (investigate ets/dets APIs)
 	      [{error, {not_implemented, Tab, Opt}}|Actions];
+	 ({record, R}, Actions) ->
+	      Actions;
 	 (Opt, Actions) ->
 	      [{error, {unknown_option, Tab, Opt}}|Actions]
       end,
@@ -164,7 +168,7 @@ alter_table_opts({Tab, Old_opts, New_opts}) ->
 %% UNFINISHED
 %% - handling of fragmented tables here?
 
-alter_table_properties(Tab, Old_opts, New_opts, Actions) ->
+alter_table_layout(Tab, Old_opts, New_opts, Actions) ->
     OldRec = get_value(record_name, Old_opts, Tab),
     NewRec = get_value(record_name, New_opts, OldRec),
     Rec_name =
@@ -177,38 +181,31 @@ alter_table_properties(Tab, Old_opts, New_opts, Actions) ->
     OldAttrs = get_value(attributes, Old_opts, [key, value]),
     NewAttrs = get_value(attributes, New_opts, [key, value]),
     Xforms = get_all_values(transforms, New_opts),
-    transform_table_properties(Tab, Rec_name, OldAttrs, NewAttrs, Xforms, Actions).
+    transform_table_layout(Tab, Rec_name, OldAttrs, NewAttrs, Xforms, Actions).
 
-%% Do the actual transforming
+%% Transform table from old to new layout.
+%%
+%% Permute and update the record layout, if it has changed
 %%
 %% UNFINISHED
-%% - the Fun must do the appropriate permutation of attributes and/or initialize
-%%   dead attributes, and run the Xforms (or run the Xforms first?)
-%% - write a "permutation helper", given old record, new record, old+new attrs
-%%   (using attr position to update)
-%% - write an "attribute transform helper" (maybe)
+%% - should use schematool_transform:... functions to get
+%%   the record defs with defaults! (from old and new table)
+%%   * new parameters
+%% - transforming helper does not exist yet!
+%% - invoke Xforms
 
-transform_table_properties(Tab, NewRec, Old_attrs, New_attrs, Xforms, Actions) ->
-    Fun = 
-	case Xforms of
-	    [] ->
-		%% UNFINISHED - permute attrs
-		ignore;
-	    _ ->
-		%% UNFINISHED
-		{error, {run_xforms, Xforms}}
-	end,
-    case NewRec of
-	undefined ->
-	    if
-		Old_attrs == New_attrs ->
-		    %% nothing to be changed, yay
-		    Actions;
-		true ->
-		    [{mnesia, transform_table, [Tab, Fun, New_attrs]}|Actions]
-	    end;
+transform_table_layout(Tab, NewRec, Old_attrs, New_attrs, Xforms, Actions) ->
+    case Xforms of
+	[] ->
+	    ok;
 	_ ->
-	    [{mnesia, transform_table, [Tab, Fun, New_attrs, NewRec]}|Actions]
+	    io:format("Warning: Xforms ~p ignored\n", [Xforms])
+    end,
+    if
+	Old_attrs == New_attrs ->
+	    Actions;
+	true ->
+	    [{schematool_helper, transform_table_layout, [Tab, Old_attrs, New_attrs]}|Actions]
     end.
 
 %% A table may have multiple storage types spread over several
@@ -302,7 +299,7 @@ alter_indexes(Tab, Old_opts, New_opts) ->
     New_ixs = get_all_values(index, New_opts),
     Old = sets:from_list(Old_ixs),
     New = sets:from_list(New_ixs),
-    Cut = sets:intersect(Old, New),
+    Cut = sets:intersection(Old, New),
     Del = sets:subtract(Old, Cut),
     Add = sets:subtract(New, Cut),
     %% or reverse their order
