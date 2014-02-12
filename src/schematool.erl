@@ -53,11 +53,15 @@
 -export(
    [module/1,
     create_schema/1,
+    load_schema/1,
     diff/2,
     diff_modules/2
    ]).
 
--export([view_schemas/0]).
+-export([view_schemas/0,
+	 schema_keys/0,
+	 get_schema/1
+	]).
 
 -include("schematool.hrl").
 
@@ -233,6 +237,36 @@ atomic({atomic, Res}) ->
 atomic(Err) ->
     Err.
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%
+%% Load a new schema from module M. Note: this does NOT upgrade/migrate
+%% yet, and MAY be problematic (since it will show up as the latest schema).
+%%
+%% Thus, mainly intended for TESTING at this time.
+%%
+%% [schematool should mark the node with the currently active schema,
+%% with 0,1 or more schema versions loaded after it. How should those
+%% schemas be treated? They are basically tentative, but probably don't
+%% form a chain; perhaps unrelated.]
+
+load_schema(M) ->
+    Schema = module(M),
+    application:ensure_all_started(mnesia),
+    case mnesia:transaction(
+	   fun() ->
+		   %% will abort if schematool_info does not exist
+		   mnesia:table_info(schematool_info, attributes),
+		   add_schema_info(Schema)
+	   end) of
+	{atomic, Res} ->
+	    Res;
+	Err ->
+	    io:format("Error when loading schema. "
+		      "Has the node been initialized?\n", 
+		      []),
+	    Err
+    end.
+
 %% Add a new schema definition to schematool_info. Note
 %% that this is just one part of migrating the schema.
 %%
@@ -255,6 +289,17 @@ add_schema_info(Datetime, Schema) ->
     mnesia:write(#schematool_info{datetime=Datetime,
 				  schema=Schema}).
 
+%% Given a schema key, read the schema.
+
+get_schema(Key) ->
+    atomic(
+      mnesia:transaction(
+	fun() ->
+		[#schematool_info{schema=S}] = 
+		    mnesia:read(schematool_info, Key),
+		S
+	end)).
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%
 %% Return all the schemas currently stored. Mostly intended for
@@ -271,6 +316,19 @@ view_schemas() ->
 		mnesia:foldr(
 		  fun(#schematool_info{} = Schema, Acc) ->
 			  [Schema|Acc]
+		  end,
+		  [],
+		  schematool_info)
+	end)).
+
+schema_keys() ->
+    application:ensure_all_started(mnesia),
+    atomic(
+      mnesia:transaction(
+	fun() ->
+		mnesia:foldr(
+		  fun(#schematool_info{datetime=Key}, Acc) ->
+			  [Key|Acc]
 		  end,
 		  [],
 		  schematool_info)
@@ -347,6 +405,15 @@ diff_ops(Old_lst, New_lst) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Collect tables that have been added, deleted or changed.
 %%
+%% Returns a list of actions that need to be performed to
+%% migrate from S0 to S1.
+%%
+%% Note: if N0 or N1 is just a single node, we do not have to
+%%  use the helper functions, just create/delete tables directly
+%%
+%% Note: interaction with add/delete nodes? 
+%% - (and changing fragments?)
+%%
 %% UNFINISHED
 %% - not sure if ordering is good
 %% - the actions need to be revised
@@ -364,11 +431,13 @@ tablesdiff(S0, S1) ->
     Deleted = [ Tab || {table, Tab, _} <- S0,
 		       not table_defined(Tab, S1) ],
     Changed = tables_changed(T0, T1),
-    [ {schematool_helper, create_table_all_nodes, [N1, Add]} 
-      || {table, Add, Opts} <- Added ] ++
-    [ {schematool_helper, delete_table_all_nodes, [N0, Del]} 
-      || Del <- Deleted ] ++
-    [ schematool_table:alter_table(Chg) || Chg <- Changed ].
+    lists:flatten(
+      [ {schematool_helper, create_table_all_nodes, [N1, Add]} 
+	|| {table, Add, Opts} <- Added ] ++
+      [ {schematool_helper, delete_table_all_nodes, [N0, Del]} 
+	|| Del <- Deleted ] ++
+      [ schematool_table:alter_table(Chg) || Chg <- Changed ]
+     ).
 
 %% Lookup the tables found in both lists of tables and check
 %% if their options field differ. If so, return both. [Added
