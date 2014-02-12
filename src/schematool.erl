@@ -36,6 +36,15 @@
 %%   * script should detect init vs upgrade
 %% - generate upgrade instructions
 %%   * later on: run them automatically
+%%
+%% Advanced topics:
+%% - qlc
+%% - automatic accessors (using indexes etc, in a
+%%   single consistent notation)
+%% - discless nodes
+%% - merging independent copies of mnesia
+%%   (may fail if same table created independently
+%%   on two nodes, do the song-and-dance)
 
 %% STATUS
 %% - still early days
@@ -47,6 +56,10 @@
     diff/2,
     diff_modules/2
    ]).
+
+-export([view_schemas/0]).
+
+-include("schematool.hrl").
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -177,7 +190,6 @@ get_nodes(Schema) ->
 %%   + store datetime as readable string/binary field
 
 -define(schematool_info, schematool_info).
--record(schematool_info, {datetime, schema}).
 
 create_schematool_info(Nodes, Schema) ->
     Datetime = calendar:universal_time(),
@@ -236,14 +248,44 @@ add_schema_info(Schema) ->
     Datetime = calendar:universal_time(),
     add_schema_info(Datetime, Schema).
 
+%% (Note: if Datetime is not given in universaltime, 
+%% things get problematically unsorted.)
+
 add_schema_info(Datetime, Schema) ->
     mnesia:write(#schematool_info{datetime=Datetime,
 				  schema=Schema}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%
+%% Return all the schemas currently stored. Mostly intended for
+%% troubleshooting or testing.
+%%
+%% - badly named? "view_" ...
+%% - should we have a schema prettyprinter? ~p might be enough
+
+view_schemas() ->
+    application:ensure_all_started(mnesia),
+    atomic(
+      mnesia:transaction(
+	fun() ->
+		mnesia:foldr(
+		  fun(#schematool_info{} = Schema, Acc) ->
+			  [Schema|Acc]
+		  end,
+		  [],
+		  schematool_info)
+	end)).
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Diff schema1 and schema2 (old vs new). Foundation for
 %% performing upgrade/downgrade/...
 %% 
+%% Notational issue: how to write table transforms?
+%% - as a separate key?
+%% - associated with table opts?
+%% - something else?
+%% - helpers to allow use of new and old record attrs
+%%
 %% UNFINISHED
 %% - output needs to be massaged
 
