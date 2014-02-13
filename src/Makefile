@@ -71,18 +71,6 @@ behaviours: $(BEHAV_OBJS)
 
 objs:	$(SCHEMATOOL_OBJS)
 
-## currently not used
-../ebin/schematool.app:
-	$(LISTIFY) $(SCHEMATOOL_MODS) > ../ebin/schematool.tmp
-	$(BIGSUBST) \
-	  -x %SCHEMATOOL_MODS% ../ebin/schematool.tmp \
-	  -e %SCHEMATOOL_VSN% $(shell cat ../vsn.mk) \
-	  -e %SCHEMATOOL_DEPS% $(shell $(LISTIFY) $(SCHEMATOOL_DEPS)) \
-	  -e %SCHEMATOOL_PROCS% $(shell $(LISTIFY) $(SCHEMATOOL_PROCS)) \
-	  -i schematool.app.src \
-	  > ../ebin/schematool.app
-	rm -f ../ebin/schematool-mods.tmp
-
 clean: clean_bin 
 
 clean_bin: clean_beam clean_app

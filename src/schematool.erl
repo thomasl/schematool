@@ -146,6 +146,7 @@ module(M) when is_atom(M) ->
 %% - no error checking, e.g., db already exists
 %% - maybe application:stop(mnesia) afterwards?
 %% - more printouts
+%% - run creation in txn and fail if some part fails
 
 cr_schema(Schema) ->
     application:load(mnesia),
@@ -172,7 +173,7 @@ cr_schema(Schema) ->
 				      io:format("Create table ~p ~p-> ~p\n", 
 						[Tab, Opts, mnesia:create_table(Tab, Opts)]);
 				 (Other) ->
-				      %% skip the others
+				      %% skip non-table items
 				      ok
 			      end,
 			      Schema),
@@ -201,12 +202,13 @@ get_nodes(Schema) ->
 %% The key is {{YYYY, MM, DD}, {H, M, S}}.
 %%
 %% UNFINISHED
-%% - how do we UPGRADE/MIGRATE this hidden table?
-%% - retire old schema versions
+%% - how do we UPGRADE/MIGRATE these hidden tables?
 %% - use erlang:now() instead of datetime?
 %%   + store datetime as readable string/binary field
+%% - should we wrap this in a txn?
 
 -define(schematool_info, schematool_info).
+-define(schematool_changelog, schematool_changelog).
 
 create_schematool_info(Nodes, Schema) ->
     Datetime = calendar:universal_time(),
@@ -223,7 +225,7 @@ create_schematool_info(Datetime, Nodes, Schema) ->
 				    {attributes, 
 				     record_info(fields, schematool_info)}])]),
     io:format("Create schematool changelog -> ~p\n", 
-	      [mnesia:create_table(?schematool_info, 
+	      [mnesia:create_table(?schematool_changelog, 
 				   [{type, ordered_set}, 
 				    {disc_copies, Nodes},
 				    {attributes, 
@@ -239,6 +241,9 @@ create_schematool_info(Datetime, Nodes, Schema) ->
 %% or an error.
 %%
 %% Can be used for diff purposes.
+%%
+%% UNFINISHED
+%% - traverse schematool_changelog for this instead!
 
 current_schema() ->
     atomic(
