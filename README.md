@@ -104,3 +104,28 @@ Scripts
 - src/*.erl: erlang files to further process the schema
 - examples/*: usage examples (NB: need more work)
 - test/*: tests (NB: empty at time of writing)
+
+TODO
+==========
+
+Usage:
+- Schematool is still a bit awkward to use.
+- Schematool uses git commit even when working on dirty data.
+  Maybe we should use datetime or something instead?
+- I don't like having to run erlc as a step,
+  can we get away from that? Epp is the big problem here.
+- Can we get away from using perl and Make to build schema?
+  A pure erlang solution would be simpler to use.
+- We now store schemas in a semi-hidden table, but I think the
+  tools aren't using this fully.
+
+Functionality: 
+- Lots still to do with schema migration. The proper approach
+  here is probably to split into stages: (1) migrate a single
+  node, (2) migrate a collection of nodes, (3) migrate a collection
+  of nodes with fragmented tables. 
+
+  (May need more stages beyond that, but that covers a lot of ground.)
+
+Tests:
+- Lots to do.
