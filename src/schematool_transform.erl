@@ -18,15 +18,18 @@
 %% Also assistance with running the table transforms
 %% as required.
 %%
+%% This seems nice:
+%%   ?MODULE:table(Tab, Xforms, Old, New)
+%%
 %% UNFINISHED
-%% - specify transforms
-%% - perform transforms
 %% - when should transforms be done during a
 %%   migration? also, do they run on all nodes?
 
 -module(schematool_transform).
 -export(
    [
+    table/3,
+    table/4,
     rec_kv/2,
     kv_rec/2,
     rec_def_of/1
@@ -41,6 +44,34 @@
 %%
 %% See rec_def_of/1 for how to extract these from
 %% schema, unless available from elsewhere
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Attribute transforms:
+%%   fun(Old_KVs) -> Value
+%% implicitly for {Attr, Default}:
+%%   {Attr, fun(Old_KVs) -> proplists:get_value(Attr, Old_KVs, Default) end}
+%%
+%% This handles cases like "sum = field1+field2" though with an
+%% unwieldy syntax.
+%%
+%% - special case: apply function to old attr value
+%% - do we always want to use fun:s here?
+
+%% Record transformers: multiple forms, probably
+%% - old-rec => interim
+%% - interim => interim
+%% - interim => new-rec
+
+%% Ordering of attribute and record transformers?
+%% - defined by user?
+%% - implicit?
+%%
+%% Special cases:
+%% - permutation of attributes
+%% - attrs deleted
+%% - attrs added (with implicit)
+%%
+%% Would be nice to be able to COMPILE these, but maybe it's OK.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Extract the 'transform' keys and use them to build
@@ -62,17 +93,94 @@ schema(#schematool_info{schema=Schema}) ->
 	  || {table, Tab, Opts} <- Schema,
 	     {transform, Tab1, Fun} <- Opts, Tab1 == Tab ].
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% UNFINISHED
-%% - more flexibility in how to transform needed
-%%   * spec per attribute transformation
-%%   * spec ...
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-transform_record(Fun, OldRecDef, OldRec, NewRecDef) ->
-    KVs = rec_kv(OldRecDef, OldRec),
-    NewKVs = Fun(KVs),
-    NewRec = kv_rec(NewRecDef, NewKVs),
-    NewRec.
+table(Tab, Old, New) ->
+    table(Tab, [], Old, New).
+
+table(Tab, Xforms, Old, New) ->
+    mnesia:foldl(
+      fun(Rec, Acc) ->
+	      KVs = rec_kv(Old, Rec),
+	      NewKVs = xforms(Xforms, KVs),
+	      NewRec = kv_rec(New, KVs),
+	      mnesia:write(Tab, NewRec, write),
+	      Acc+1
+      end,
+      0,
+      Tab).
+
+%% xforms is a list of local transforms.
+%%
+%% {attr, A, Fun}: Fun(Val, KVs) -> NewVal, replaces value of A
+%% {rec, Fun}: Fun(KVs) -> NewKVs, updates the list of key-values
+%%
+%% NOTE: attributes A are not restricted to attribute names,
+%%  we can use them as temp variables too. But the final record
+%%  is constructed from the new record definition's attributes.
+%%
+%% - might be useful with some predefined helpers, e.g.
+%%     {?MOD, sum, [attr1,...,attrN]}
+
+xforms(Xfs, KVs) ->
+    lists:foldl(fun xform/2, KVs, Xfs).
+
+xform({attr, A, Fun}, KVs) ->
+    V = proplists:get_value(A, KVs, undefined),
+    NewV = app(Fun, V, KVs),
+    NewKVs = replace(A, NewV, KVs),
+    NewKVs;
+xform({rec, Fun}, KVs) ->
+    NewKVs = app(Fun, KVs),
+    NewKVs;
+xform(Xf, _KVs) ->
+    exit({unknown_table_xform, Xf}).
+
+%% or lists:keyreplace
+
+replace(A, New, [{A, _Old}|Xs]) ->
+    [{A, New}|Xs];
+replace(A, New, [KV|Xs]) ->
+    [KV|replace(A, New, Xs)];
+replace(A, New, []) ->
+    %% hmm
+    [].
+
+%% attr app
+
+app(F, Val, KVs) when is_function(F) ->
+    case catch F(Val, KVs) of
+	{'EXIT',_} ->
+	    Val;
+	NewVal ->
+	    NewVal
+    end;
+app({M, F, As}, Val, KVs) ->
+    %% or pass As as 1 arg?
+    case catch apply(M, F, As ++ [Val, KVs]) of
+	{'EXIT',_} ->
+	    Val;
+	NewVal ->
+	    NewVal
+    end.
+
+%% rec app
+
+app(F, KVs) when is_function(F) ->
+    case catch F(KVs) of
+	{'EXIT',_} ->
+	    KVs;
+	NewKVs ->
+	    NewKVs
+    end;
+app({M, F, As}, KVs) ->
+    %% or pass As as 1 arg?
+    case catch apply(M, F, As ++ [KVs]) of
+	{'EXIT',_} ->
+	    KVs;
+	NewKVs ->
+	    NewKVs
+    end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% One of the problems of transforming the records of a table
