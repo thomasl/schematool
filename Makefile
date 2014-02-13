@@ -15,4 +15,8 @@ clean:
 	make clean -C test/
 
 test:
-	make -C smart_exceptions/devel test/ MAKEFLAGS="test""
+	make -C smart_exceptions/devel test/ MAKEFLAGS="test"
+
+# also need to 'make all'?
+pull:
+	git pull --recurse-submodules && git submodule update
