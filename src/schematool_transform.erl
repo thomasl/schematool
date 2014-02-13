@@ -37,6 +37,9 @@
 
 -include("schematool.hrl").
 
+-define(dbg(Str, Xs), io:format(Str, Xs)).
+%-define(dbg(Str, Xs), ok).
+
 %% Record definitions look like:
 %%   {RecName :: atom(), [ attr() ]}
 %% where
@@ -110,61 +113,63 @@ table(Tab, Xforms, Old, New) ->
       0,
       Tab).
 
-%% xforms is a list of local transforms.
+%% xforms is a list of local/table transforms.
 %%
+%% {attr, A, PrevA}: copy A := PrevA
 %% {attr, A, Fun}: Fun(Val, KVs) -> NewVal, replaces value of A
 %% {rec, Fun}: Fun(KVs) -> NewKVs, updates the list of key-values
+%%
+%% (Global transforms {db, Fun} are specified at the schema level.)
 %%
 %% NOTE: attributes A are not restricted to attribute names,
 %%  we can use them as temp variables too. But the final record
 %%  is constructed from the new record definition's attributes.
 %%
-%% - might be useful with some predefined helpers, e.g.
+%% NOTE: simple attribute copying could be done at ZERO runtime cost
+%%  by renaming attribute A to access the position of PrevA!
+%%  - doesn't work if we are copying A := PrevA, A' := PrevA, etc
+%%    but I think the 'rename' is a fairly common case
+%%  - but alas, we don't have that level of control of records or
+%%    their usage elsewhere, so we leave it for another time
+%%
+%% - might be useful to provide some helpers, e.g.
 %%     {?MOD, sum, [attr1,...,attrN]}
+%%   or whatnot
 
 xforms(Xfs, KVs) ->
     lists:foldl(fun xform/2, KVs, Xfs).
 
+xform({attr, A, PrevA}, KVs) when is_atom(PrevA) ->
+    %% copy value, A := PrevA
+    %% - useful when renaming an attribute
+    V = proplists:get_value(PrevA, KVs, undefined),
+    NewKVs = replace(A, V, KVs),
+    NewKVs;
 xform({attr, A, Fun}, KVs) ->
-    V = proplists:get_value(A, KVs, undefined),
-    NewV = app(Fun, V, KVs),
+    %% Fun(KVs) -> Value
+    NewV = app(Fun, KVs),
     NewKVs = replace(A, NewV, KVs),
     NewKVs;
 xform({rec, Fun}, KVs) ->
+    %% Fun(KVs) -> NewKVs
     NewKVs = app(Fun, KVs),
     NewKVs;
 xform(Xf, _KVs) ->
     exit({unknown_table_xform, Xf}).
 
-%% or lists:keyreplace
+%% Replaces value of Attr with New, adding
+%% the key-value if not found.
 
-replace(A, New, [{A, _Old}|Xs]) ->
-    [{A, New}|Xs];
-replace(A, New, [KV|Xs]) ->
-    [KV|replace(A, New, Xs)];
-replace(A, New, []) ->
-    %% hmm
-    [].
+replace(Attr, New, [{Attr, _}|Xs]) ->
+    [{Attr, New}|Xs];
+replace(Attr, New, [X|Xs]) ->
+    [X|replace(Attr, New, Xs)];
+replace(Attr, New, []) ->
+    [{Attr, New}].
 
-%% attr app
-
-app(F, Val, KVs) when is_function(F) ->
-    case catch F(Val, KVs) of
-	{'EXIT',_} ->
-	    Val;
-	NewVal ->
-	    NewVal
-    end;
-app({M, F, As}, Val, KVs) ->
-    %% or pass As as 1 arg?
-    case catch apply(M, F, As ++ [Val, KVs]) of
-	{'EXIT',_} ->
-	    Val;
-	NewVal ->
-	    NewVal
-    end.
-
-%% rec app
+%% Apply, F(KVs) -> NewKVs or NewVal
+%%
+%%  (NewVal when used by attr, NewKVs for rec)
 
 app(F, KVs) when is_function(F) ->
     case catch F(KVs) of
@@ -277,10 +282,11 @@ rec_def_of({table, Tab, Opts}) ->
 	    AttrDefs = proplists:get_value(attributes, Opts, [key,value]),
 	    {Rec, AttrDefs};
 	RawRec ->
-	    case proplist:get_value(attributes, Opts, undefined) of
+	    case proplists:get_value(attributes, Opts, undefined) of
 		undefined ->
 		    exit({attributes_needed, Opts});
 		Attrs ->
+		    ?dbg("attrs ~p, raw rec ~p\n", [Attrs, RawRec]),
 		    [Rec|RawAttrs] = tuple_to_list(RawRec),
 		    AttrDefs =
 			[ attr_def(Zip) || Zip <- lists:zip(Attrs, RawAttrs) ],

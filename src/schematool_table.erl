@@ -18,7 +18,8 @@
 -module(schematool_table).
 -export(
    [alter_table/1,
-    alter_storage_type/4
+    alter_storage_type/4,
+    without_schematool_options/1
    ]).
 
 -import(proplists, 
@@ -155,59 +156,92 @@ alter_table_options({Tab, Old_opts, New_opts}) ->
       New_opts
      ).
 
-%% This function collects the following options:
-%%   attributes,
-%%   record_name,
-%%   explicit table transform funs (schematool extension)
+%% 
+
+without_schematool_options(Opts) ->
+    [ Opt || Opt <- Opts,
+	     not schematool_option(Opt) ].
+
+schematool_option({record, _Rec}) ->
+    true;
+schematool_option({transform, _Xf}) ->
+    true;
+schematool_option({transform, _Vsn, _Xf}) ->
+    true;
+schematool_option(_) ->
+    false.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Alter table layout, using schematool_transform
 %%
-%% Use:
-%% mnesia:transform_table(Tab, Fun, New_attrs, New_rec)
-%% mnesia:transform_table(Tab, Fun, New_attrs)
-%%  Fun can be 'ignore' if we just change the namings
+%% - where are the attribute and record xforms?
+%%   + how do we invoke them?
 %%
 %% UNFINISHED
-%% - handling of fragmented tables here?
+%% - transforms are specified simplistically, we should have
+%%   some sort of (Vsn -> Vsn) key like appup to avoid
+%%   implicit dependences on "previous" schema
+%% - we currently permit
+%%     {transform, ..., Xf}
+%%   where Xf is a schematool_transform table xform.
+%% - should pass something that can select correctly versioned xforms
 
 alter_table_layout(Tab, Old_opts, New_opts, Actions) ->
-    OldRec = get_value(record_name, Old_opts, Tab),
-    NewRec = get_value(record_name, New_opts, OldRec),
-    Rec_name =
-	if
-	    OldRec == NewRec ->
-		undefined;
-	    true ->
-		NewRec
-	end,
-    OldAttrs = get_value(attributes, Old_opts, [key, value]),
-    NewAttrs = get_value(attributes, New_opts, [key, value]),
-    Xforms = get_all_values(transforms, New_opts),
-    transform_table_layout(Tab, Rec_name, OldAttrs, NewAttrs, Xforms, Actions).
+    Old_rec_def = schematool_transform:rec_def_of({table, Tab, Old_opts}),
+    New_rec_def = schematool_transform:rec_def_of({table, Tab, New_opts}),
+    Xforms = [ last_element(Xf) || Xf <- keysearch_all(transform, 1, New_opts) ],
+    transform_table_layout(Tab, Old_rec_def, New_rec_def, Xforms, Actions).
 
-%% Transform table from old to new layout.
-%%
-%% Permute and update the record layout, if it has changed
-%%
-%% UNFINISHED
-%% - should use schematool_transform:... functions to get
-%%   the record defs with defaults! (from old and new table)
-%%   * new parameters
-%% - transforming helper does not exist yet!
-%% - invoke Xforms
-
-transform_table_layout(Tab, NewRec, Old_attrs, New_attrs, Xforms, Actions) ->
-    case Xforms of
-	[] ->
-	    ok;
-	_ ->
-	    io:format("Warning: Xforms ~p ignored\n", [Xforms])
-    end,
+transform_table_layout(Tab, Old_rec_def, New_rec_def, Xforms, Actions) ->
     if
-	Old_attrs == New_attrs ->
-	    Actions;
+	Old_rec_def == New_rec_def ->
+	    if
+		Xforms == [] ->
+		    Actions;
+		true ->
+		    %% layout unchanged but transforms still specified
+		    %% - should we warn+skip?
+		    [{warning, {layout_unchanged_but_transforms, Tab, Xforms}},
+		     {schematool_helper, transform_table_layout,
+		      [Tab, Xforms, Old_rec_def, Old_rec_def]}|Actions]
+	    end;
 	true ->
-	    [{schematool_helper, transform_table_layout, [Tab, Old_attrs, New_attrs]}|Actions]
+	    %% attributes have changed, shuffle the table
+	    if
+		Xforms == [] ->
+		    [{schematool_helper, transform_table_layout,
+		      [Tab, Old_rec_def, New_rec_def]}|Actions];
+		true ->
+		    [{schematool_helper, transform_table_layout,
+		      [Tab, Xforms, Old_rec_def, New_rec_def]}|Actions]
+	    end
     end.
 
+%% Lookup all occurrences with element N equalling Key,
+%% returning a list
+%%
+%% - this allows us to collect all of
+%%   {transform, Xf} and {transform, FromTo, Xf} and so on
+%%   which is good for flexibility
+
+keysearch_all(Key, N, [Item|Xs]) when is_tuple(Item) ->
+    case catch element(N, Item) == Key of
+	true ->
+	    [Item|keysearch_all(Key, N, Xs)];
+	_ ->
+	    keysearch_all(Key, N, Xs)
+    end;
+keysearch_all(Key, N, [_|Xs]) ->
+    keysearch_all(Key, N, Xs);
+keysearch_all(_Key, _N, []) ->
+    [].
+
+%% Utility
+
+last_element(T) when is_tuple(T) ->
+    element(size(T), T).
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% A table may have multiple storage types spread over several
 %% nodes. We perform the changes on a node-basis:
 %% - node may have table added or deleted

@@ -47,7 +47,18 @@
 %%   on two nodes, do the song-and-dance)
 
 %% STATUS
-%% - still early days
+%% - still early days, but (a) creates schema from spec
+%%   and (b) generates reasonable migration plan from
+%%   schema diffs (diff/2)
+%% - now keep all schemas in semi-hidden schematool_info
+%%   * should perhaps also keep the chain of migrations
+%%     and current schema in some table(s)
+%%   * that way, we can have a number of unofficial
+%%     and unused schemas loaded too, then migrate to these
+%%   * two basic actions: migrate(A->B) and create(A) (perhaps
+%%     recreate(A) or clear() too)
+%%   * should we check whether a schema is a duplicate of
+%%     some existing one?
 
 -module(schematool).
 -export(
@@ -60,7 +71,8 @@
 
 -export([view_schemas/0,
 	 schema_keys/0,
-	 get_schema/1
+	 get_schema/1,
+	 delete_schema/1
 	]).
 
 -include("schematool.hrl").
@@ -154,8 +166,9 @@ cr_schema(Schema) ->
 			    application:start(mnesia),
 			    create_schematool_info(Nodes, Schema),
 			    lists:foreach(
-			      fun({table, Tab, Opts}) ->
+			      fun({table, Tab, Opts0}) ->
 				      %% check return value
+				      Opts = schematool_table:without_schematool_options(Opts0),
 				      io:format("Create table ~p ~p-> ~p\n", 
 						[Tab, Opts, mnesia:create_table(Tab, Opts)]);
 				 (Other) ->
@@ -209,6 +222,12 @@ create_schematool_info(Datetime, Nodes, Schema) ->
 				    {disc_copies, Nodes},
 				    {attributes, 
 				     record_info(fields, schematool_info)}])]),
+    io:format("Create schematool changelog -> ~p\n", 
+	      [mnesia:create_table(?schematool_info, 
+				   [{type, ordered_set}, 
+				    {disc_copies, Nodes},
+				    {attributes, 
+				     record_info(fields, schematool_changelog)}])]),
     io:format("Write schema info -> ~p\n",
 	      [mnesia:transaction(
 		 fun() ->
@@ -284,10 +303,17 @@ add_schema_info(Schema) ->
 
 %% (Note: if Datetime is not given in universaltime, 
 %% things get problematically unsorted.)
+%%
+%% UNFINISHED
+%% - undo: should we store {create, Key, Schema} ...?
+%%   that permits us to undo, at a cost of much more
+%%   garbage
 
 add_schema_info(Datetime, Schema) ->
     mnesia:write(#schematool_info{datetime=Datetime,
-				  schema=Schema}).
+				  schema=Schema}),
+    mnesia:write(#schematool_changelog{datetime=Datetime,
+				       action={create, Datetime}}).
 
 %% Given a schema key, read the schema.
 
@@ -332,6 +358,36 @@ schema_keys() ->
 		  end,
 		  [],
 		  schematool_info)
+	end)).
+
+schema_actions() ->
+    application:ensure_all_started(mnesia),
+    atomic(
+      mnesia:transaction(
+	fun() ->
+		mnesia:foldr(
+		  fun(#schematool_changelog{datetime=Key, action=Act}, Acc) ->
+			  [{Key, Act}|Acc]
+		  end,
+		  [],
+		  schematool_changelog)
+	end)).
+
+%% Note: this is a DANGEROUS OPERATION, since you can e.g., delete the
+%% currently used schema and so confuse schematool and yourself. Be
+%% careful.
+%%
+%% - should we store {delete, Key, Schema} for undo? :-)
+
+delete_schema(Key) ->
+    application:ensure_all_started(mnesia),
+    Datetime = calendar:universal_time(),
+    atomic(
+      mnesia:transaction(
+	fun() ->
+		mnesia:delete({schematool_info, Key}),
+		mnesia:write(#schematool_changelog{datetime=Datetime,
+						   action={delete, Key}})
 	end)).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -414,10 +470,24 @@ diff_ops(Old_lst, New_lst) ->
 %% Note: interaction with add/delete nodes? 
 %% - (and changing fragments?)
 %%
+%% STATUS
+%% - the generated actions looked pretty good when moving
+%%   from schema A to schema B and back again
+%%   * e.g., recreated table, changed layout back, etc
+%%   * like Rails migrations, dropping fields loses data,
+%%     but this is up to the user at the moment
+%%     
 %% UNFINISHED
-%% - not sure if ordering is good
+%% - not sure if ordering of actions is good
 %% - the actions need to be revised
 %%   * create table with correct options
+%% - warning if attributes lost/dropped?
+%% - might be nice to have notation handling
+%%   renaming a field back and forth automatically
+%%   (e.g., field id is copied to old_id and updated;
+%%   on down migration, auto-copy old_id to id again
+%%   to restore?) (except new records might not have
+%%   a valid old_id ...)
 
 tablesdiff(S0, S1) ->
     %% Select tables from schema def, since it's a list
@@ -432,7 +502,7 @@ tablesdiff(S0, S1) ->
 		       not table_defined(Tab, S1) ],
     Changed = tables_changed(T0, T1),
     lists:flatten(
-      [ {schematool_helper, create_table_all_nodes, [N1, Add]} 
+      [ {schematool_helper, create_table_all_nodes, [N1, Add, Opts]} 
 	|| {table, Add, Opts} <- Added ] ++
       [ {schematool_helper, delete_table_all_nodes, [N0, Del]} 
 	|| Del <- Deleted ] ++

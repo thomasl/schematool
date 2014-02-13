@@ -8,7 +8,9 @@
 -module(schematool_helper).
 -export(
    [create_schema/2,
-    delete_schema/1
+    delete_schema/1,
+    transform_table_layout/3,
+    transform_table_layout/4
    ]).
 
 %% Create schema on Node.
@@ -67,3 +69,16 @@ results_ok(MFA, Results) ->
       end,
       Results).
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%
+%% UNFINISHED
+%% - are these entrypoints entirely superfluous?
+%% - maybe we should put schematool_transform:table in new runtime lib?
+%%   (e.g., compute schema diff at one node, run it on others)
+
+transform_table_layout(Tab, Old_rec_def, New_rec_def) ->
+    schematool_transform:table(Tab, Old_rec_def, New_rec_def).
+
+transform_table_layout(Tab, Xforms, Old_rec_def, New_rec_def) ->
+    schematool_transform:table(Tab, Xforms, Old_rec_def, New_rec_def).
+    

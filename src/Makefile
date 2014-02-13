@@ -52,7 +52,8 @@ SCHEMATOOL_MODS= \
 	schematool_table \
 	schematool_nodes \
 	schematool_transform \
-	schematool_helper
+	schematool_helper \
+	schematool_xf
 
 SCHEMATOOL_SRC := $(patsubst %, %.erl, $(SCHEMATOOL_MODS))
 OM_SRC=$(SCHEMATOOL_SRC)
