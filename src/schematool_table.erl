@@ -18,8 +18,7 @@
 -module(schematool_table).
 -export(
    [alter_table/1,
-    alter_storage_type/4,
-    without_schematool_options/1
+    alter_storage_type/4
    ]).
 
 -import(proplists, 
@@ -155,21 +154,6 @@ alter_table_options({Tab, Old_opts, New_opts}) ->
       [],
       New_opts
      ).
-
-%% 
-
-without_schematool_options(Opts) ->
-    [ Opt || Opt <- Opts,
-	     not schematool_option(Opt) ].
-
-schematool_option({record, _Rec}) ->
-    true;
-schematool_option({transform, _Xf}) ->
-    true;
-schematool_option({transform, _Vsn, _Xf}) ->
-    true;
-schematool_option(_) ->
-    false.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Alter table layout, using schematool_transform

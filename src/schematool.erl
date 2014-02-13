@@ -168,7 +168,7 @@ cr_schema(Schema) ->
 			    lists:foreach(
 			      fun({table, Tab, Opts0}) ->
 				      %% check return value
-				      Opts = schematool_table:without_schematool_options(Opts0),
+				      Opts = schematool_options:without(Opts0),
 				      io:format("Create table ~p ~p-> ~p\n", 
 						[Tab, Opts, mnesia:create_table(Tab, Opts)]);
 				 (Other) ->
