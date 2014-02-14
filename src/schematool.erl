@@ -50,15 +50,16 @@
 %% - still early days, but (a) creates schema from spec
 %%   and (b) generates reasonable migration plan from
 %%   schema diffs (diff/2)
-%% - now keep all schemas in semi-hidden schematool_info
-%%   * should perhaps also keep the chain of migrations
-%%     and current schema in some table(s)
-%%   * that way, we can have a number of unofficial
-%%     and unused schemas loaded too, then migrate to these
-%%   * two basic actions: migrate(A->B) and create(A) (perhaps
-%%     recreate(A) or clear() too)
-%%   * should we check whether a schema is a duplicate of
-%%     some existing one?
+%% - for foo.schema, the generated schema is written as a term to
+%%   foo.schema.term; we will consult that file and load it into
+%%   the database
+%%   * previously, we loaded it as a module and invoked it,
+%%     which was regrettable
+%% - schema versions are kept in schematool_info
+%%   and the changes are kept in schematool_changelog
+%% - find current schema by looking at changelog
+%% - loaded schemas with same vsn => warning
+%%   {vsn, "foo"}
 
 -module(schematool).
 -export(
@@ -119,17 +120,46 @@ create_schema(M) ->
     io:format("Creating ...\n", []),
     cr_schema(Schema).
 
+%% Given the module or filename, retrieve the schema or exit.
+%%
+%% Note: we try to handle both when invoked from cmdline and
+%% inside a program, and when given atoms or strings.
+
 module([M]) when is_atom(M) ->
-    %% (when used on command line)
     module(M);
 module(M) when is_atom(M) ->
-   case catch M:schema() of
-       {'EXIT', Rsn} ->
-	   io:format("schematool: EXIT ~p\n", [Rsn]);
-       Schema ->
-	   Schema
-   end.
-    
+    File = filename(M),
+    consult(File);
+module(File) when length(File) >= 0 ->
+    %% ASSUME string, try to open variants
+    consult_one([File, File++".schema.term", File ++ ".term"]);
+module(M) ->
+    exit({module_or_filename_not_handled, M}).
+
+filename(A) when is_atom(A) ->
+    lists:flatten([atom_to_list(A), ".schema.term"]).
+
+consult_one([F|Fs]) ->
+    case catch consult(F) of
+	{'EXIT', Rsn} ->
+	    consult_one(Fs);
+	Res ->
+	    Res
+    end;
+consult_one([]) ->
+    %% or something more useful?
+    exit({error, enoent}).
+
+consult(F) ->
+    case file:consult(F) of
+	{ok, [Schema]} ->
+	    Schema;
+	{ok, [Schema|_]} ->
+	    exit({multiple_schemas_in_file, F});
+	Err ->
+	    exit(Err)
+    end.
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%
 %% Initialize the current node using the defined schema.

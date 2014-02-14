@@ -76,7 +76,7 @@ unless ($etmp) {
 }
 
 unless ($ebin) {
-    $ebin = ".";
+    $ebin = $etmp;
 }
 
 unless ($einc) {
@@ -91,34 +91,34 @@ unless ($outf) {
     $outf = $etmp."/".$schemamod.".erl";
 }
 
-# Get rid of this
+# Get rid of this, escape the files etc
 print STDERR "Note: No escaping of arguments done; spaces etc may cause trouble\n";
 
-## Body of script
-##
-## UNFINISHED
-## - Not sure why system() pretends to fail, wrong return code? what?
-## - Seems to work at the moment
+## Body of script:
+## - generate the schema modules and compile them
+## - use compiled modules to write schema into $schemafile.term
+##   (makefiles can then track dependence)
 
 my $cmd;
 $cmd = "perl $SCHEMAMOD_PL --schemafile $schemafile --outfile $outf --module $schemamod --force";
 print STDERR "$cmd\n";
 system($cmd);
 
-my @VSNFILE = `perl $SCHEMAMOD_PL --schemafile $schemafile --vsnfile --outfile $outf`;
-my $vsnfile = $VSNFILE[0];
-print STDERR "vsn file is $vsnfile\n";
-
 $cmd = "erlc -I $einc -pa $epath -o $ebin $outf";
 print STDERR "$cmd\n";
 system($cmd) ;
 
-$cmd = "erlc -I $einc -pa $epath -o $ebin $vsnfile";
+my $printexpr = "io:format(\"~p.\\n\", [$schemamod:schema()]).";
+$cmd = "erl -noshell -pa $ebin -eval '$printexpr' -s init stop > $schemafile.term";
 print STDERR "$cmd\n";
 system($cmd) ;
 
-## At this point, you can run the rest in
-## erlang, as
-##   erl -pa $ebin ...
+## Clean up the generated erlang and beam files
+## Remove $outf and "$ebin/$schemamod.beam"
 ##
-## In erlang, call $schemamod:schema() to get the schema definition
+## UNFINISHED
+## - check that $etmp, $ebin, $schemamod aren't set to strange things
+
+$cmd = "(rm -f $outf && rm -rf $ebin/$schemamod.beam)";
+print STDERR "NOT RUN: $cmd\n";
+# system($cmd);

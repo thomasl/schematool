@@ -31,14 +31,6 @@
 ##
 ## UNFINISHED
 ## - add predefined -import helpers to make schema defs even simpler
-## - multiple versions of a schema?
-##   - X.schema => X.erl + X_vsn.erl
-##     this means we can easily keep multiple versions around
-##     without getting module name clashes (most recent schema
-##     is given by X.erl, pointing to X_vsn.erl)
-##   1/ get version from schema file (somehow)
-##   2/ generate X_vsn.erl
-##   3/ generate X.erl
 
 use Getopt::Long;
 use File::Basename qw(fileparse basename);
@@ -49,7 +41,6 @@ use strict;
 my $file;
 my $outfile;
 my $module;
-my $vsn;
 my $force_overwrite = 0;
 my $print_vsnfile = 0;
 
@@ -57,7 +48,6 @@ GetOptions(
     'schemafile=s' => \$file,
     'outfile=s' => \$outfile,
     'module=s' => \$module,
-    'vsn=s' => \$vsn,
     'force' => \$force_overwrite,
     'vsnfile' => \$print_vsnfile
     );
@@ -68,7 +58,6 @@ sub usage() {
 	"$0 --schemafile file.schema ...\n".
 	"  --outfile file\n".
 	"  --module modname\n".
-	"  --vsn string\n".
 	"  --force\n".
 	"to generate the schema code, or\n".
 	"$0 --schemafile file.schema --outfile file --vsnfile\n".
@@ -86,48 +75,9 @@ unless ($outfile) {
     die "No output file given (--outfile file.erl)";
 }
 
-## We are going to emit two files with two modules,
-##   $outfile     (name: $module)
-##   $outfile_vsn (name: $vsn_module)
-## where $outfile is just a wrapper calling $vsn_module
-##
-## If not given, we derive the vsn from the git log (when available)
-
-# my $outfile_vsn = basename($outfile, ".erl");
-my ($outfile_vsn, $outdir) = fileparse($outfile, ".erl");
-unless ($vsn) {
-    my @gitlog = `git log -1 --abbrev-commit | grep commit`;
-    my $gitline = @gitlog[0];
-    unless ($gitline) {
-	## git log not found, die
-	die "No version given (--vsn [a-zA-Z0-9_]+)";
-    };
-    $gitline =~ m!^commit\s+(\w+)!;
-    my $gitvsn = $1;
-    unless ($gitvsn) {
-	## no commit found, die
-	die "No version given (--vsn [a-zA-Z0-9_]+)";
-    };
-    $vsn = $gitvsn;
-}
-
 unless ($module) {
     my $module_prefix = basename($file, ".schema");
     $module = $module_prefix."_schema";
-}
-
-my $vsn_module = $module."_".$vsn;
-my $outfile_vsn = $outdir.$vsn_module.".erl";
-
-## This is used when the enclosing script does not pass
-## a --vsn value, we then emit the name we used
-##
-## (Vulnerable to race conditions in repo, so a better
-## solution would be nice.)
-
-if ($print_vsnfile) {
-    print $outfile_vsn."\n";
-    exit 0;
 }
 
 unless (-f $file) {
@@ -213,7 +163,7 @@ if ($num_lines > 0) {
 my $prologue = $sections{"prologue"};
 $prologue = 
     $prologue.
-    "\n-module($vsn_module).".
+    "\n-module($module).".
     "\n-export([schema/0]).".
     "\n\n";
 
@@ -231,42 +181,21 @@ $sections{"schema"} = $schemasec;
 
 ########################################
 ## Phase 3: print the result
-##
-## Two modules: 
-##  $outfile (named $module)
-##  $outfile_vsn (named $vsn_module)
-
-## Print the wrapper module
-##
-## This is basically just a string
 
 use POSIX;
 my $datetime = strftime("%Y-%m-%d %H:%M:%S\n", localtime(time));
 
-open (OUT, ">$outfile") or die "Unable to open $outfile: $!";
-print OUT <<WRAPPER;
-%% -*- Erlang -*-
-%%
-%% Auto-generated $datetime
-
--module($module).
--export([schema/0]).
-
-schema() ->
-   $vsn_module:schema().
-
-WRAPPER
-close(OUT);
-
 ## We now have all the sections, print them
 ## in the order they appeared.
 
-open (OUT, ">$outfile_vsn") or die "Unable to open $outfile: $!";
+open (OUT, ">$outfile") or die "Unable to open $outfile: $!";
+print OUT 
+    "%% -*- Erlang -*-\n".
+    "%% Generated: $datetime \n";
 foreach my $key (@section_list) {
     print OUT "%% SECTION ".$key."\n";
     print OUT $sections{$key};
 }
-
 print OUT "%% END\n";
 close OUT;
 
