@@ -101,8 +101,17 @@ schema(#schematool_info{schema=Schema}) ->
 table(Tab, Old, New) ->
     table(Tab, [], Old, New).
 
-table(Tab, Xforms, Old, New) ->
-    mnesia:foldl(
+%% Update the tabel to the new layout
+%% 
+%% NOTE: mnesia:transform_table/4 is implicitly a txn => do not wrap.
+%%
+%% UNFINISHED
+%% - indexes updated elsewhere
+
+table(Tab, Xforms, Old, New = {New_rec, New_attr_dflts}) ->
+    New_attrs = attr_names(New_attr_dflts),
+    mnesia:transform_table(
+      Tab, 
       fun(Rec, Acc) ->
 	      KVs = rec_kv(Old, Rec),
 	      NewKVs = xforms(Xforms, KVs),
@@ -110,8 +119,18 @@ table(Tab, Xforms, Old, New) ->
 	      mnesia:write(Tab, NewRec, write),
 	      Acc+1
       end,
-      0,
-      Tab).
+      New_attrs,
+      New_rec).
+
+%% UNFINISHED
+%% - is this available elsewhere?
+
+attr_names([{A, Dflt}|Xs]) ->
+    [A|attr_names(Xs)];
+attr_names([A|Xs]) when is_atom(A) ->
+    [A|attr_names(Xs)];
+attr_names([]) ->
+    [].
 
 %% xforms is a list of local/table transforms.
 %%
