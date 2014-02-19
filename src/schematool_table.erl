@@ -6,6 +6,24 @@
 %% Altering a table definition. This is done
 %% given the old and new definitions.
 %%
+%% REWRITE:
+%% - check if table needs to be copied
+%%   * in this case, we can just create the new table
+%%     the way it should end, then copy+xform the data
+%%     (twice...)
+%%   * if not, layout changes + update table options
+%% - fragmented tables
+%%   * detect that frags are used
+%%   * change of #frags
+%%   * migrate frag (per above)
+%%   * frag <-> nonfrag
+%% - derive a schema from current db
+%% - verify that current db complies with schema 
+%%
+%% NOTE: looks like fragmented tables are explicitly
+%%  updated to frag status, rather than declaring them.
+%%  Thus, schematool should provide a declarative approach.
+%%
 %% UNFINISHED
 %% 1/ collect ALL of the changes in one call
 %%    (rec name, attrs, etc)
@@ -18,7 +36,10 @@
 -module(schematool_table).
 -export(
    [alter_table/1,
-    alter_storage_type/4
+    alter_storage_type/4,
+    copy_table/2,
+    lossy_copy_table/3,
+    migration_needs_table_copy/1
    ]).
 
 -import(proplists, 
@@ -56,7 +77,44 @@ alter_table({Tab, Old_opts, New_opts}=TabDiff) ->
     Acts1 = alter_table_layout(Tab, Old_opts, New_opts, []),
     Acts2 = alter_storage_type(Tab, Old_opts, New_opts, []),
     Acts3 = alter_indexes(Tab, Old_opts, New_opts),
-    [Acts0, Acts1, Acts2, Acts3].
+    lists:flatten(
+      [Acts0, Acts1, Acts2, Acts3]
+     ).
+
+%% Predicate: test if migration will require copying the table. This
+%% test affects the migration strategy chosen by schematool.
+%%
+%% This may be needed because of table type or table options that
+%% can't be adjusted after the table has been created.
+%%
+%% Note: this function is normally called when Old_opts and New_opts
+%% differ in some respect.
+%%
+%% Note: does not consider fragmented tables.
+
+migration_needs_table_copy({_Tab, Old_opts, New_opts}) ->
+    lists:any(
+      fun({type, New}) ->
+	      option_not_same(New, type, set, Old_opts);
+	 ({local_content, New}) ->
+	      option_not_same(New, local_content, false, Old_opts);
+	 ({storage_properties, New}) ->
+	      option_not_same(New, storage_properties, undefined, Old_opts);
+	 ({snmp, New}) ->
+	      option_not_same(New, snmp, undefined, Old_opts);
+	 (_Other) ->
+	      false
+      end,
+      New_opts).
+
+option_not_same(New, Opt, Dflt, Old_opts) ->
+    Old = get_value(Opt, Old_opts, Dflt),
+    if
+	Old =/= New ->
+	    true;
+	true ->
+	    false
+    end.
 
 %% Returns a list of instructions
 %% - perhaps with a priority so we can sort them
@@ -94,23 +152,22 @@ alter_table_options({Tab, Old_opts, New_opts}) ->
 		      Actions
 	      end;
 	 ({disc_copies, Ns}, Actions) ->
-	      %% Handled elsewhere
+	      %% Handled by alter_storage_type
 	      Actions;
 	 ({ram_copies, Ns}, Actions) ->
 	      %% Handled elsewhere
 	      Actions;
 	 ({disc_only_copies, Ns}, Actions) ->
-	      %% Handled elsewhere
+	      %% Handled by alter_storage_type
 	      Actions;
 	 ({attributes, Attrs}, Actions) ->
-	      %% Handled elsewhere
+	      %% Handled by alter_storage_type 
 	      Actions;
 	 ({record_name, Rec}, Actions) ->
-	      %% Handled elsewhere
+	      %% Handled by alter_storage_type 
 	      Actions;
 	 ({index, Ixs}, Actions) ->
-	      %% Handle this case in a second pass, there can
-	      %% be several indexes declared. Skip here.
+	      %% Handled by alter_indexes
 	      Actions;
 	 ({type, Type}=Opt, Actions) ->
 	      %% check if changed
@@ -122,7 +179,7 @@ alter_table_options({Tab, Old_opts, New_opts}) ->
 	      Old = get_value(type, Old_opts, set),
 	      if
 		  Type =/= Old -> 
-		      [{error, {unable_to_change, Tab, Opt}}|Actions];
+		      [{error, {unable_to_change, Tab, Opt, {previous, Old}}}|Actions];
 		  true ->
 		      Actions
 	      end;
@@ -131,7 +188,7 @@ alter_table_options({Tab, Old_opts, New_opts}) ->
 	      Old = get_value(local_content, Old_opts, false),
 	      if
 		  Bool =/= Old -> 
-		      [{error, {unable_to_change, Tab, Opt}}|Actions];
+		      [{error, {unable_to_change, Tab, Opt, {previous, Old}}}|Actions];
 		  true ->
 		      Actions
 	      end;
@@ -154,6 +211,151 @@ alter_table_options({Tab, Old_opts, New_opts}) ->
       [],
       New_opts
      ).
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%
+%% Altering table type:
+%%
+%%   set -> bag: copy, at worst
+%%   ordered_set -> bag: copy, at worst
+%%   set -> ordered_set: copy
+%%   ordered_set -> set: copy, at worst
+%%   bag -> *: copy, with possible data loss
+%%
+%% Thus, when moving from bag to some other type, we
+%% run the risk of data loss. Otherwise, copying is safe.
+%%
+%% Note that mnesia appears not to support changing the type of a
+%% table at runtime.  We could generically do this (A -> B):
+%%
+%% 1/ create A', identical to A
+%% 2/ copy data of A to A'
+%% 3/ delete A
+%% 4/ recreate A with new options
+%% 5/ copy data of A' to A
+%% 6/ delete A'
+%%
+%% If mnesia had a way to rename a table, we could instead do the
+%% cheaper option (saving one copy!):
+%%
+%% 1'/ create new table A'
+%% 2'/ copy data from A to A'
+%% 3'/ delete A
+%% 4'/ rename A' to A
+%%
+%% Note: if A is a bag, multiple values per key will lead to data loss
+%% when copied to bag.  We could detect data loss before this point.
+%% 
+%% Note that the general case can change table type, storage type
+%% and what nodes it can occur on. We should try to be intelligent
+%% in these cases, e.g., stay out of disc_only_copies as long as
+%% possible. [The even more general case can also change other
+%% table options, but let's leave that for elsewhere.]
+%%
+%% Finally, generic copying also supports cases such as changing
+%% other table options apart from type (e.g., storage options,
+%% local storage, and whatnot), where copying may be required
+%% to properly transition to the new table definition.
+%%  Basically, copying the table to one with the new options seems
+%% to solve MOST issues with table changes (not data loss though, nor
+%% layout; not sure about distribution).
+%%
+%% UNFINISHED
+%% - changes storage type at same time!
+%%   * could also do layout xform in second copy, I think
+%% - check that it works properly on distributed system
+%% - check that it works for fragments ...
+%% - storage type of TEMP COPY should be settable
+%%   * ram_copies should be very fast (but needs more memory)
+%%   * storing table on "better set of nodes" than old_opts MIGHT be a win
+%%   * after copying, change table copies to those of New_opts
+%%     (= replicate to new nodes) then do the final copying
+%% - is there some easier way to do this? existing mnesia operation?
+%% - idea: optimize for memory: explicit copying from node A to B?
+%%   that way, we do not need to build a temp table (probably)
+
+alter_table_type(Tab, Old_opts, New_opts, Old_type, New_type, Actions) ->
+    TmpTab = temp_table_name(Tab),
+    RecName = record_name_of(Tab, Old_opts),
+    Tmp_opts = adjust_options(RecName, Old_opts),
+    [{mnesia, create_table, [TmpTab, Tmp_opts]},
+     {schematool_helper, copy_table, [Tab, TmpTab]},
+     {mnesia, delete_table, [Tab]},
+     {mnesia, create_table, [Tab, New_opts]},
+     case {Old_type, New_type} of
+	 {set, _} ->
+	     {schematool_helper, copy_table, [TmpTab, Tab]};
+	 {ordered_set, _} ->
+	     {schematool_helper, copy_table, [TmpTab, Tab]};
+	 {bag, _} ->
+	     %% UNFINISHED
+	     %% - get collision policy Coll from New_opts if possible
+	     %%   'keep_some_value' is default 
+	     %%   (= just copy and overwrite)
+	     %%   - if target is 'bag' too, not lossy
+	     Coll = keep_some_value,
+	     {schematool_helper, lossy_copy_table, [Coll, TmpTab, Tab]}
+     end,
+     %% Finally delete the temporary table
+     {mnesia, delete_table, [TmpTab]}
+     |Actions].
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Adjusting the nodes of the temporary table:
+%% - the end action is to copy to the nodes in New_opts
+%% - thus, no inherent need to have temp table on all
+%%   old nodes
+%% - however, MIGHT be better to copy slow tables to ram_copies
+%%   on origin node before transferring?
+%%   * if old table is disc_copies_only, could get slow
+%%   * but using ram_copies could eat too much memory
+%% - if table has multiple storage types, might be better
+%%   to just choose to copy from the "fast" types?
+%%
+%% Clearly, some optimization thinking should be used
+%% here to minimize the cost. Creating the temp table
+%% on the old nodes should be safe, however.
+%%
+%% Other adjustments:
+%% - adjust layout while copying? (combine with alter_table_layout)
+%% - lossy copy can be done first, ie inherit type from New_opts
+%%   (since this reducs the amount of data)
+
+%% Opts are the options of the old table, adjust them to suit the
+%% temporary table.
+%%
+%% 1/ set record_name to that used by the old table
+%% 2/ [adjust storage type and nodes to optimize copying]
+%%
+%% UNFINISHED
+%% - adjust storage type and nodes used etc
+
+adjust_options(Tab, Opts) ->
+    record_name_of(Tab, Opts).
+
+record_name_of(Tab, [{record_name, _Rec}|Opts]=Lst) ->
+    %% we have an explicit record name, use that
+    Lst;
+record_name_of(Tab, [Opt|Opts]) ->
+    %% skip
+    [Opt|record_name_of(Tab, Opts)];
+record_name_of(Tab, []) ->
+    %% In this case, there is no explicit record_name def
+    %% so insert one
+    [{record_name, Tab}].
+	
+%% essentially a gensym
+%%
+%% - to be completely safe, should first check whether TmpName already
+%%   is an atom (list_to_existing_atom/1 fails, or something)
+
+temp_table_name(Tab) ->
+    {A, B, C} = erlang:now(),
+    TmpName = 
+	lists:flatten(
+	  io_lib:format("~p_~p_~p_~p",
+			[Tab, A, B, C])),
+    list_to_atom(TmpName).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Alter table layout, using schematool_transform
@@ -301,6 +503,7 @@ storage_type(Type, Opts, Dict) ->
 %% - are cases 2/3 errors instead? investigate
 
 alter_storage(_Tab, {_Node, {Type, Type}}) ->
+    %% No change
     [];
 alter_storage(Tab, {Node, {undefined, Type}}) ->
     {mnesia, add_table_copy, [Tab, Node, Type]};
@@ -327,3 +530,65 @@ alter_indexes(Tab, Old_opts, New_opts) ->
     [{mnesia, del_table_index, Tab, Attr}
      || Attr <- sets:to_list(Del) ]
     .
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Copy set/ordered_set to other table type
+%%
+%% Uses sticky_write to signal we need to lock the table for a longish
+%% time; however, note that normally Tab1 is a freshly created
+%% unshared table, so write collisions should never occur.
+%%
+%% - refactor: should this code be in schematool_table?
+
+copy_table(Tab0, Tab1) ->
+    mnesia:foldl(
+      fun(Rec, Acc) ->
+	      mnesia:write(Tab1, Rec, sticky_write),
+	      0
+      end,
+      0,
+      Tab0).
+
+%% Copy bag table to set/ordered_set
+%%
+%% In this case, we run the risk of losing data (since a bag
+%% can contain multiple records per key). We thus support 
+%% collision policies to decide what to do for such cases.
+%% (The simplest policy is just to choose one of the records,
+%% for instance, the last encountered/written record.)
+%%
+%% - refactor: should this code be in schematool_table?
+
+lossy_copy_table(keep_some_value, Tab0, Tab1) ->
+    %% This option just overwrites any previous value,
+    %% so it keeps one of the bag entries. (Which one
+    %% depends on mnesia traversal order.)
+    mnesia:foldl(
+      fun(Rec, Acc) ->
+	      mnesia:write(Tab1, Rec, sticky_write),
+	      0
+      end,
+      0,
+      Tab0);
+lossy_copy_table(keep_first_value, Tab0, Tab1) ->
+    %% if key already has a value, discard this record
+    mnesia:foldl(
+      fun(Rec, Acc) ->
+	      %% UNFINISHED
+	      %% normally, key to use is 2nd arg, but
+	      %% I think mnesia is flexible; we will
+	      %% need to pass the table options to handle
+	      %% this
+	      Key = element(2, Rec),
+	      case mnesia:read(Tab1, Key, sticky_write) of
+		  [] ->
+		      mnesia:write(Tab1, Rec, sticky_write);
+		  [_PrevRec] ->
+		      ok
+	      end
+      end,
+      0,
+      Tab0);
+lossy_copy_table(Other, _Tab0, _Tab1) ->
+    exit({collision_policy_not_yet_handled, Other}).
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
