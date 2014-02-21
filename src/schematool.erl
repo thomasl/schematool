@@ -50,16 +50,23 @@
 %% - still early days, but (a) creates schema from spec
 %%   and (b) generates reasonable migration plan from
 %%   schema diffs (diff/2)
-%% - for foo.schema, the generated schema is written as a term to
-%%   foo.schema.term; we will consult that file and load it into
-%%   the database
-%%   * previously, we loaded it as a module and invoked it,
-%%     which was regrettable
 %% - schema versions are kept in schematool_info
 %%   and the changes are kept in schematool_changelog
 %% - find current schema by looking at changelog
+%%
+%% UNFINISHED
 %% - loaded schemas with same vsn => warning
 %%   {vsn, "foo"}
+%% - derive schema by checking mnesia
+%% - verify schema (derived vs latest)
+%% - repair schema: diff
+%% - nodes should (perhaps) be specified as
+%%    {NodeName, Startup}
+%%   e.g.,
+%%    {'a@hostname', "erl -pa ../ebin -name ..."}
+%%   this way we can ensure that they're all started when
+%%   creating the schema
+%%   * also, current node doesn't have to be a member
 
 -module(schematool).
 -export(
@@ -185,6 +192,7 @@ cr_schema(Schema) ->
 	Nodes == [] ->
 	    io:format("No nodes found, stopping\n",[]);
 	true ->
+	    require_all_nodes_up(Nodes),
 	    io:format("- schema for nodes ~p\n", [Nodes]),
 	    case lists:member(node(), Nodes) of
 		true ->
@@ -194,7 +202,7 @@ cr_schema(Schema) ->
 			ok ->
 			    %% Now create the tables and do whatever other setup
 			    %% is needed
-			    application:start(mnesia),
+			    start_mnesia_all_nodes(Nodes),
 			    create_schematool_info(Nodes, Schema),
 			    lists:foreach(
 			      fun({table, Tab, Opts0}) ->
@@ -221,10 +229,110 @@ cr_schema(Schema) ->
 	    end
     end.
 
+%% Ensure that all nodes in Ns are connected or exit.
 %%
+%% NB: would be nice to also have a tool for STARTING the nodes on all the remote hosts
+%%  sigh
+
+require_all_nodes_up(Ns0) ->
+    Ns = lists:sort(Ns0),
+    Nodes = lists:sort(nodes()),
+    case Ns == Nodes of
+	true ->
+	    ok;
+	false ->
+	    %% ping all nodes in Ns but not in nodes()
+	    %% - if ping fails, the whole thing fails
+	    lists:foreach(
+	      fun(N) ->
+		      case lists:member(N, Nodes) of
+			  true ->
+			      ok;
+			  false ->
+			      case net_adm:ping(N) of
+				  pong ->
+				      ok;
+				  pang ->
+				      exit({unable_to_connect_to_node, N})
+			      end
+		      end
+	      end,
+	      Ns)
+    end.
+
+%% 
 
 get_nodes(Schema) ->
-    proplists:get_value(nodes, Schema, [node()]).
+    [ node_name_of(N) || N <- proplists:get_value(nodes, Schema, [node()]) ].
+
+%% OBSOLETE
+%% - only Node = atom() permitted for now
+
+node_name_of({Node, _Startup}) ->
+    Node;
+node_name_of(Node) when is_atom(Node) ->
+    Node.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Start nodes locally
+%%
+%% Intended for testing: start nodes locally
+%%
+%% Example:
+%%   start_local_nodes([a,b], Host, "erl -detached -pa ../ebin -name ~p").
+%%
+%% - be careful ...
+%% - can be used to start nodes remotely with the right ssh or whatever
+%%   * I think node starting should be done by epmd ...
+%%     = start epmd on all hosts
+%%     = config to run as appropriate user in appropriate place
+%%       (in a jail or something) [associated with cookie?]
+%%     = start nodes with os:cmd when so ordered by someone
+
+start_local_nodes(Startup, SNames) ->
+    %% PORTABILITY: this works on OS/X (Mavericks)
+    Host = lists:flatten(os:cmd("hostname -s")),
+    start_local_nodes(SNames, Host, Startup).
+
+start_local_nodes(Startup, Host, SNames) ->
+    lists:foreach(
+      fun(SName) ->
+	      %% 1/ ping node, if up we're done
+	      %% 2/ 
+	      %% 
+	      %% (a bit wasteful to construct this atom, but
+	      %% I want to make the format string natural)
+	      Name = list_to_atom(
+		       lists:flatten(
+			 io_lib:format("~p@~p", [SName, Host]))),
+	      Cmd = lists:flatten(io_lib:format(Startup, [Name])),
+	      io:format("'~s' -> ~p\n", [Cmd, os:cmd(Cmd)])
+      end,
+      SNames).
+
+%% Stop node N.
+%%
+%% Mostly intended for testing, but can be used whenever
+
+stop_node(N) ->
+    rpc:call(N, init, stop, []).
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Start mnesia on all nodes
+%%
+%% - no checking of return value, is that good?
+%% - should we use rpc:multicall instead and look over the
+%%   results en masse?
+
+start_mnesia_all_nodes(Ns) ->
+    lists:foreach(
+      fun(N) ->
+	      io:format(
+		"start mnesia ~p -> ~p\n", 
+		[N, rpc:call(N, application, ensure_all_started, [mnesia])]
+	       )
+      end,
+      Ns).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Store the current and previous schema versions.
