@@ -18,7 +18,7 @@
 %%   * we then avoid trouble with doing dangerous ops
 %%     like mnesia:delete_schema on possibly every node
 %% - schematool should be configurable to do a BACKUP
-%%   before any dangerous/data-lossy migration
+%%   before any dangerous/lossy migration
 %%   * how to detect this? [mark ops as dangerous?]
 %%   * how to do this?
 %%     - how to be efficient about it?
@@ -55,8 +55,13 @@
 %% - find current schema by looking at changelog
 %%
 %% UNFINISHED
-%% - loaded schemas with same vsn => warning
-%%   {vsn, "foo"}
+%% - loaded schemas with existing vsn => warning
+%%   use {vsn, "foo"} attribute
+%%   * vsn = undefined skipped
+%%   * lookup by vsn
+%% - reuse schema
+%%   * with renamed nodes (everywhere)
+%%   * extended (= explicit diff)
 %% - derive schema by checking mnesia
 %% - verify schema (derived vs latest)
 %% - repair schema: diff
@@ -143,6 +148,8 @@ module(File) when length(File) >= 0 ->
 module(M) ->
     exit({module_or_filename_not_handled, M}).
 
+%% The default schema file of module is module.schema.term
+
 filename(A) when is_atom(A) ->
     lists:flatten([atom_to_list(A), ".schema.term"]).
 
@@ -156,6 +163,9 @@ consult_one([F|Fs]) ->
 consult_one([]) ->
     %% or something more useful?
     exit({error, enoent}).
+
+%% Read the schema file if possible.  Only permit one schema in a
+%% file.
 
 consult(F) ->
     case file:consult(F) of
@@ -368,12 +378,17 @@ create_schematool_info(Datetime, Nodes, Schema) ->
 				    {disc_copies, Nodes},
 				    {attributes, 
 				     record_info(fields, schematool_changelog)}])]),
-    io:format("Write schema info -> ~p\n",
-	      [mnesia:transaction(
-		 fun() ->
-			 add_schema_info(Datetime, Schema)
-		 end)
-	       ]).
+    case mnesia:transaction(
+	   fun() ->
+		   z_add_schema_info(Datetime, Schema)
+	   end) of
+	{atomic, ok} ->
+	    io:format("Write schema info -> ok\n", []);
+	Err ->
+	    io:format("Error when creating schema -> ~p\n",
+		      [Err]),
+	    init:stop(1)
+    end.
 
 %% Return current schema definition (as a #schemainfo record),
 %% or an error.
@@ -413,7 +428,7 @@ atomic(Err) ->
 
 load_schema(M) ->
     Schema = module(M),
-    application:ensure_all_started(mnesia),
+    wait_for_mnesia(),
     case mnesia:transaction(
 	   fun() ->
 		   %% will abort if schematool_info does not exist
@@ -423,11 +438,20 @@ load_schema(M) ->
 	{atomic, Res} ->
 	    Res;
 	Err ->
-	    io:format("Error when loading schema. "
+	    io:format("Error when loading schema: ~p\n"
 		      "Has the node been initialized?\n", 
-		      []),
+		      [Err]),
 	    Err
     end.
+
+%% UNFINISHED
+%% - check return value ensure_all_started
+%% - the MaxWait constant is icky
+
+wait_for_mnesia() ->
+    {ok, _} = application:ensure_all_started(mnesia),
+    MaxWait = 5000,
+    ok = mnesia:wait_for_tables([schematool_info, schematool_changelog], MaxWait).
 
 %% Add a new schema definition to schematool_info. Note
 %% that this is just one part of migrating the schema.
@@ -437,27 +461,107 @@ load_schema(M) ->
 %% should always be universaltime() to avoid timezone issues.
 %% (See add_schema_info/1.)
 %% 
-%% Perhaps: also store datetime as formatted binary field for
-%% convenience. E.g., <<"2014-01-01 23:59:59Z">> or something.
+%% UNFINISHED
+%% - pass origin as
+%%    {Absfilename::binary(), Mtime::datetime()}
+%%   this should be returned when consulting the file
+%%   (from module/1)
+%%   * origin is used to detect when the same file is
+%%     being loaded
+%%   * alternative: use filesize+SHA1 if you're feeling
+%%     paranoid
 
 add_schema_info(Schema) ->
     Datetime = calendar:universal_time(),
-    add_schema_info(Datetime, Schema).
+    Origin = undefined,
+    z_add_schema_info(Datetime, Schema, Origin).
+
+%% (currently not used, see above for Origin)
+
+add_schema_info(Schema, Origin) ->
+    Datetime = calendar:universal_time(),
+    z_add_schema_info(Datetime, Schema, Origin).
 
 %% (Note: if Datetime is not given in universaltime, 
 %% things get problematically unsorted.)
 %%
 %% UNFINISHED
 %% - undo: should we store {create, Key, Schema} ...?
-%%   that permits us to undo, at a cost of much more
-%%   garbage
+%%   that permits user-level undo, at a cost of much more
+%%   garbage? see if there's any demand for that
+%% - refactor this
+%%   * the z_add_schema_info/2 function shouldn't exist ...
 
-add_schema_info(Datetime, Schema) ->
+z_add_schema_info(Datetime, Schema) ->
+    z_add_schema_info(Datetime, Schema, undefined).
+    
+z_add_schema_info(Datetime, Schema, Origin) ->
+    Vsn = get_version(Schema),
+    warn_if_version_exists(Vsn),
     mnesia:write(#schematool_info{datetime=Datetime,
-				  schema=Schema}),
+				  vsn=Vsn,
+				  schema=Schema,
+				  origin=Origin}),
     mnesia:write(#schematool_changelog{datetime=Datetime,
 				       action={create, Datetime}}).
 
+%% Get the vsn attribute, undefined if not found.
+%% - check that there's just one? or leave that to
+%%   a separate phase (later)
+
+get_version(Schema) ->
+    to_binary(proplists:get_value(vsn, Schema)).
+
+%% Convert vsn to binary if set. This is the canonical
+%% form; we do it in particular to avoid cases when some
+%% versions are given as lists, others as binaries.
+%%
+%% We should PERHAPS special-case version given as
+%% tuple of integers and emit <<"X.Y.Z.W...">>. 
+%% This is left for later.
+
+to_binary(undefined) ->
+    undefined;
+to_binary(Lst) when is_list(Lst), length(Lst) >= 0 ->
+    list_to_binary(Lst);
+to_binary(Bin) when is_binary(Bin) ->
+    Bin;
+to_binary(Vsn) ->
+    io:format("Warning: vsn should be binary or list, "
+	      "converting ~p to binary\n", [Vsn]),
+    list_to_binary(io_lib:format("~p", [Vsn])).
+
+%% If the current vsn exists, warn the user. Note
+%% that the schemas can still coexist since they get
+%% different primary keys (datetime).
+%%
+%% NB: this is a full table scan, we rely on there
+%% being few schemas. Add an index on vsn otherwise.
+%% 
+%% UNFINISHED
+%% - pretty-print the datetime?
+
+warn_if_version_exists(undefined) ->
+    ok;
+warn_if_version_exists(Vsn) when is_binary(Vsn) ->
+    Pat = #schematool_info{vsn=Vsn, _='_'},
+    case mnesia:match_object(Pat) of
+	[] ->
+	    ok;
+	[#schematool_info{datetime=DT}] ->
+	    io:format("Warning: a previous schema (vsn ~p) is already "
+		      "loaded (~p)\n",
+		      [Vsn, DT]);
+	PrevSchemas ->
+	    io:format("Warning: Multiple schemas (vsn ~p) are already "
+		      "loaded\n~s\n",
+		      [Vsn,
+		       lists:flatten(
+			 [ io_lib:format(" ~p: ~p\n", [Vsn0, DT])
+			   || #schematool_info{vsn=Vsn0, datetime=DT} <- PrevSchemas ])])
+    end.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Given a schema key, read the schema.
 
 get_schema(Key) ->
@@ -478,7 +582,7 @@ get_schema(Key) ->
 %% - should we have a schema prettyprinter? ~p might be enough
 
 view_schemas() ->
-    application:ensure_all_started(mnesia),
+    wait_for_mnesia(),
     atomic(
       mnesia:transaction(
 	fun() ->
@@ -491,7 +595,7 @@ view_schemas() ->
 	end)).
 
 schema_keys() ->
-    application:ensure_all_started(mnesia),
+    wait_for_mnesia(),
     atomic(
       mnesia:transaction(
 	fun() ->
@@ -504,7 +608,7 @@ schema_keys() ->
 	end)).
 
 schema_actions() ->
-    application:ensure_all_started(mnesia),
+    wait_for_mnesia(),
     atomic(
       mnesia:transaction(
 	fun() ->
@@ -523,7 +627,7 @@ schema_actions() ->
 %% - should we store {delete, Key, Schema} for undo? :-)
 
 delete_schema(Key) ->
-    application:ensure_all_started(mnesia),
+    wait_for_mnesia(),
     Datetime = calendar:universal_time(),
     atomic(
       mnesia:transaction(
