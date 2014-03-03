@@ -20,9 +20,25 @@
 %% - derive a schema from current db
 %% - verify that current db complies with schema 
 %%
+%% NOTE: decision whether copying is needed is VERY CENTRAL
+%%  to how we proceed. Fragmented tables should also take
+%%  this into account. [I don't _think_ fragmentation forces
+%%  table copying though. In fact, it might be simplified.]
+%%
+%% NOTE: table copying might also be managed by backup
+%%  and traverse_backup. This might be an implementation
+%%  detail.
+%% 
 %% NOTE: looks like fragmented tables are explicitly
 %%  updated to frag status, rather than declaring them.
-%%  Thus, schematool should provide a declarative approach.
+%%  Schematool should provide a declarative approach
+%%  rather than a procedural one.
+%%
+%% NOTE: should warn the user that migration will
+%%  entail copying
+%%
+%% - might also want to tell that N records need to be
+%%   migrated? table_info(Tab, size)
 %%
 %% UNFINISHED
 %% 1/ collect ALL of the changes in one call
@@ -64,6 +80,13 @@
 %%   * some options can't be changed
 %% - perform change options in appropriate order
 %%
+%% Note:
+%% - if table size = 0, we can skip some actions
+%%   * e.g., copying not needed
+%% - if table size is small, we can do different
+%%   strategy than if table is large
+%%   * small table can migrate via ram_copies
+%%
 %% UNFINISHED
 %% - what is the correct order of actions?
 %%   e.g., change table opts before or after layout, etc
@@ -73,13 +96,26 @@
 %%   * should we specify dependences and sort?
 
 alter_table({Tab, Old_opts, New_opts}=TabDiff) ->
+    Size = num_records(Tab),
+    Comment = {comment, 
+	       lists:flatten(io_lib:format("~p has ~p records\n",
+					   [Tab, Size]))},
     Acts0 = alter_table_options(TabDiff),
     Acts1 = alter_table_layout(Tab, Old_opts, New_opts, []),
     Acts2 = alter_storage_type(Tab, Old_opts, New_opts, []),
     Acts3 = alter_indexes(Tab, Old_opts, New_opts),
     lists:flatten(
-      [Acts0, Acts1, Acts2, Acts3]
+      [Comment, Acts0, Acts1, Acts2, Acts3]
      ).
+
+%% Compute number of records in table
+%%
+%% UNFINISHED
+%% - ensure mnesia started, else we can falsely get size=0
+%% - fragmented table size? check if this needs attention
+
+num_records(Tab) ->
+    mnesia:table_info(Tab, size).
 
 %% Predicate: test if migration will require copying the table. This
 %% test affects the migration strategy chosen by schematool.
@@ -155,7 +191,7 @@ alter_table_options({Tab, Old_opts, New_opts}) ->
 	      %% Handled by alter_storage_type
 	      Actions;
 	 ({ram_copies, Ns}, Actions) ->
-	      %% Handled elsewhere
+	      %% Handled by alter_storage_type
 	      Actions;
 	 ({disc_only_copies, Ns}, Actions) ->
 	      %% Handled by alter_storage_type
