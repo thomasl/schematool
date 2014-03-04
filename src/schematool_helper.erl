@@ -18,6 +18,11 @@
     copy_table/2,
     lossy_copy_table/3
    ]).
+-export(
+   [adjust_fragments/3,
+    add_pool_nodes/2,
+    delete_pool_nodes/2
+   ]).
 
 %% Add new mnesia node N + replicate schema to it
 %%
@@ -144,4 +149,19 @@ copy_table(Tab0, Tab1) ->
 
 lossy_copy_table(Coll, Tab0, Tab1) ->
     schematool_table:lossy_copy_table(Coll, Tab0, Tab1).
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Operations on fragmented tables and associated stuff. Can also
+%% convert between fragmented and unfragmented tables.
+%% 
+%% DO NOT RUN IN TXN due to internals doing txns (sigh)
+
+adjust_fragments(Tab, Old, New) ->
+    schematool_frag:adjust_fragments(Tab, Old, New).
+
+add_pool_nodes(Tab, Nodes) ->
+    schematool_frag:add_pool_nodes(Tab. Nodes).
+
+delete_pool_nodes(Tab, Nodes) ->
+    schematool_frag:delete_pool_nodes(Tab. Nodes).
 

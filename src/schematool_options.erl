@@ -26,6 +26,8 @@ table_option({transform, _Xf}) ->
     true;
 table_option({transform, _Vsn, _Xf}) ->
     true;
+table_option({fragments, _N}) ->
+    true;
 table_option(_) ->
     false.
 
