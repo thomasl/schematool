@@ -160,8 +160,8 @@ adjust_fragments(Tab, Old, New) ->
     schematool_frag:adjust_fragments(Tab, Old, New).
 
 add_pool_nodes(Tab, Nodes) ->
-    schematool_frag:add_pool_nodes(Tab. Nodes).
+    schematool_frag:add_pool_nodes(Tab, Nodes).
 
 delete_pool_nodes(Tab, Nodes) ->
-    schematool_frag:delete_pool_nodes(Tab. Nodes).
+    schematool_frag:delete_pool_nodes(Tab, Nodes).
 

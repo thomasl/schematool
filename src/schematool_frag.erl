@@ -52,7 +52,7 @@
 
 -module(schematool_frag).
 -export(
-   [alter_node_pool/3,
+   [alter_node_pool/4,
     alter_fragments/4,
     adjust_fragments/3,
     declared_fragments/1
@@ -113,7 +113,7 @@ diff(Opts0, Opts1) ->
 %% Note: each change_table_frag/2 is a new transaction, so if we add M
 %% nodes and delete N nodes, we will do M+N transactions.
 
-alter_node_pool(Old_pool, New_pool, Actions) ->
+alter_node_pool(Tab, Old_pool, New_pool, Actions) ->
     {Added, _Remain, Deleted} = schematool_nodes:diff(Old_pool, New_pool),
     if_nonempty(
       Added,
