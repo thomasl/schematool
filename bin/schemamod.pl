@@ -17,8 +17,7 @@
 ## Writes module to example_schema.erl
 ## - note that if there are errors in example.schema,
 ##   the generated module will have errors too
-##
-## 
+## - keep track of current line to give good erlang error message
 
 ########################################
 ## We define the schema as a template
@@ -119,14 +118,21 @@ my @section_list;
 ## There is an initial 'prologue' where all 
 ## lines before the first section line are
 ## collected.
+##
+## $line_no keeps track of current line
+## $section_line{$section} maps to the starting line of the section
+##   (This is used to emit -file attributes for source compile errors)
 
 my $curr_section = "prologue";
 my @curr_lines;
 my %sections;
+my %section_line;
 my $num_lines = 0;
+my $line_no = 0;
 
 foreach my $line (@lines) {
     $num_lines += 1;
+    $line_no += 1;
     if ($line =~ m!^%%=(\w+)!) {
 	## Flush current section
 	push @section_list, $curr_section;
@@ -137,6 +143,8 @@ foreach my $line (@lines) {
 	@curr_lines = ();
 	$num_lines = 0;
 	$section = "";
+	$section_line{$curr_section} = $line_no;
+	# print STDERR "Section $curr_section -> line $line_no\n"; 
     } else {
 	push @curr_lines, $line;
     }
@@ -168,8 +176,14 @@ $prologue =
     "\n\n";
 
 $sections{"prologue"} = $prologue;
+$section_line{"prologue"} = "1";
 
 ## generate the schema as a function
+##
+## Since we add N lines to the front, subtract the same N from
+## $section_line{"schema"}, otherwise the compiler will generate off-by-N
+## error messages.
+##  (N=1 currently.)
 
 my $schemasec = $sections{"schema"};
 unless ($schemasec) {
@@ -178,6 +192,7 @@ unless ($schemasec) {
 
 $schemasec = "schema() -> \n".$schemasec."\n\n";
 $sections{"schema"} = $schemasec;
+$section_line{"schema"} -= 1;   ## because we added 1 line to section above
 
 ########################################
 ## Phase 3: print the result
@@ -193,7 +208,9 @@ print OUT
     "%% -*- Erlang -*-\n".
     "%% Generated: $datetime \n";
 foreach my $key (@section_list) {
+    my $sec_line = $section_line{$key} || die "Section line not found for '$key'";
     print OUT "%% SECTION ".$key."\n";
+    print OUT "-file(\"$file\", $sec_line).\n";
     print OUT $sections{$key};
 }
 print OUT "%% END\n";
