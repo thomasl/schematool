@@ -49,6 +49,13 @@
 %%   delete A
 %%   create A as fragmented table
 %%   copy A' to A
+%%
+%% Helper:
+%%   Start extra nodes from shell as
+%%     erl -sname $NODE -s mnesia
+%%   Then 
+%%     net_adm:ping($NODE) => pong
+%% Makes it easier to run a more complex test
 
 -module(schematool_frag).
 -export(
