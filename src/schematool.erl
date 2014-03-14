@@ -90,6 +90,9 @@
 
 -include("schematool.hrl").
 
+-define(schematool_tables, 
+	[schematool_info, schematool_changelog, schema]).
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 -spec schematool:module(module()) -> any().
@@ -584,6 +587,22 @@ get_vsn(V) ->
 		    mnesia:match_object(#schematool_info{vsn=V, _='_'}),
 		Schema#schematool_info.schema
 	end)).
+
+%% Collect the tables defined by the schema with the given key
+
+tables_of(Key) ->
+    Schema = get_schema(Key),
+    [ Tab || {table, Tab, _Opts} <- Schema ] ++
+	?schematool_tables.
+
+%% Migration from K0 to K1:
+%%
+%% 0/  Actions = diff_keys(K0, K1)
+%% 1/  Migrate = migration_fun(Actions)   <-- write this ...
+%% 2/  Tabs = tables_of(K0),
+%% 3/  schematool_backup:migrate(Tabs, Migrate)
+%%
+%% Well, that's it! :-)
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%
