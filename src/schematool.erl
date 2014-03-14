@@ -573,6 +573,18 @@ get_schema(Key) ->
 		S
 	end)).
 
+%% Lookup the schema associated with vsn
+%% - fail if not exactly one schema
+
+get_vsn(V) ->
+    atomic(
+      mnesia:transaction(
+	fun() ->
+		[Schema] = 
+		    mnesia:match_object(#schematool_info{vsn=V, _='_'}),
+		Schema#schematool_info.schema
+	end)).
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%
 %% Return all the schemas currently stored. Mostly intended for
@@ -663,6 +675,14 @@ diff_modules(M0, M1) ->
 diff_current(M1) ->
     S1 = M1:schema(),
     #schematool_info{schema=S0} = current_schema(),
+    diff(S0, S1).
+
+%% diff_versions(V0, V1)
+%% - V0 and V1 are versions of loaded schemas
+
+diff_versions(V0, V1) ->
+    S0 = get_vsn(V0),
+    S1 = get_vsn(V1),
     diff(S0, S1).
 
 %% diff of schemas S0, S1
