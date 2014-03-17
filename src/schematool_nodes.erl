@@ -15,12 +15,89 @@
    [
     diff/2,
     alter_nodes/2,
-    alter_nodes/4
+    alter_nodes/4,
+    node_available/1,
+    add_schema_node/1
    ]).
 
 -define(dbg(Str, Xs), io:format(Str, Xs)).
 %-define(dbg(Str,Xs), ok).
 
+%% Preparation (proposed)
+%% - collect all node names that need to be available
+%% - ping them prior to starting
+
+%% Use this prior to adding table copies, etc.
+
+node_available(N) ->
+    case net_adm:ping(N) of
+	pong ->
+	    case rpc:call(N, mnesia, start, []) of
+		ok ->
+		    true;
+		Err ->
+		    ?dbg("Unable to start mnesia on ~p: ~p\n",
+			 [N, Err]),
+		    false
+	    end;
+	pang ->
+	    ?dbg("Node unreachable: ~p\n", [N]),
+	    false
+    end.
+
+%% Add node N to hold the schematool tables.
+%%
+%% NB: add_table_copy/3 seems to run in its own txn,
+%%  returns 
+
+add_schema_node(N) ->
+    true = node_available(N),
+    TabType = schematool:schematool_table_type(),
+    lists:foreach(
+      fun(Tab) ->
+	      case mnesia:add_table_copy(
+		     schematool_info, 
+		     N,
+		     TabType) of
+		  {atomic, ok} ->
+		      ok;
+		  {aborted, {already_exists, Tab, N}} ->
+		      ok;
+		  {aborted, {not_active, Tab, N}} ->
+		      %% ruh-roh
+		      exit(nyi);
+		  {aborted, Other} ->
+		      io:format("add_schema_node(~p) ABORT -> ~w\n", [N, Other]),
+		      exit(nyi)
+	      end
+      end,
+      schematool:schematool_tables()
+     ).
+
+% {aborted,{already_exists,schematool_info,_}}
+% {aborted,{not_active,schema,N}}
+
+%% Delete schema node = delete schematool table copies
+%%
+%% Returns bool, aborts if some table copy can't be deleted.
+%%
+%% Run in txn (due to del_table_copy)
+
+delete_schema_node(N) ->
+    true = node_available(N),
+    lists:foreach(
+      fun(Tab) ->
+	      case mnesia:del_table_copy(Tab, N) of
+		  {atomic, ok} ->
+		      ok;
+		  {aborted, Err} ->
+		      io:format("delete_schema_node(~p) ABORT -> ~w\n",
+				[N, Err]),
+		      exit(nyi)
+	      end
+      end,
+      schematool:schematool_tables()).
+    
 %% Input: lists of nodes
 %% Output: {Added, Remaining, Deleted},
 %%  which are lists of nodes
