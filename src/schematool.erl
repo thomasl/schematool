@@ -3,7 +3,27 @@
 %%% Description : 
 %%% Created : 22 Jan 2014 by Thomas Lindgren <>
 
+%% Schematool status
+%% - initialize schema db
+%% - generate db.schema -> db.schema.term via a
+%%   toolchain (because epp is a joke at the
+%%   expense of mainkind)
+%% - load db.schema.term into db
+%% - migrate between schemas using
+%%   * schematool generates migration actions
+%%       UNFINISHED - these need to be marshalled
+%%   * schematool_backup acts as a wrapper,
+%%     including rollback on failure (distributed!)
+%% - UNFINISHED
+%%   * previous attempts at schema management should
+%%     be removed, see below
+%%
+%% However, note that migration can be time consuming
+%% in some cases, e.g., that a lot of data need to be
+%% rewritten and/or copied. 
+%%
 %% NOTE: to run schematool, see ../bin/schematool.pl
+%%   (Also see Makefile for WF or erlmail.)
 %%
 %% This module is the start of schema processing once we
 %% have the schema module compiled and generated.
@@ -85,8 +105,15 @@
 -export([view_schemas/0,
 	 schema_keys/0,
 	 get_schema/1,
-	 delete_schema/1
+	 delete_schema/1,
+	 current_schema/0
 	]).
+
+-export(
+   [tables_of/1,
+    schematool_tables/0,
+    schematool_table_type/0
+   ]).
 
 -include("schematool.hrl").
 
@@ -294,13 +321,19 @@ node_name_of(Node) when is_atom(Node) ->
 %% Example:
 %%   start_local_nodes([a,b], Host, "erl -detached -pa ../ebin -name ~p").
 %%
-%% - be careful ...
+%% UNFINISHED
 %% - can be used to start nodes remotely with the right ssh or whatever
 %%   * I think node starting should be done by epmd ...
 %%     = start epmd on all hosts
 %%     = config to run as appropriate user in appropriate place
 %%       (in a jail or something) [associated with cookie?]
 %%     = start nodes with os:cmd when so ordered by someone
+%% - use 'slave' module?
+%%   * would be better if epmd could do it...
+%%     = use erlpmd library to manage this on one node
+%%       * permissions for cookie to start node
+%%     = erlpmd starts slaves with the proper cookies etc
+%%     = nodes can also start and connect with erlpmd the usual way
 
 start_local_nodes(Startup, SNames) ->
     %% PORTABILITY: this works on OS/X (Mavericks)
@@ -402,6 +435,7 @@ create_schematool_info(Datetime, Nodes, Schema) ->
 %% - traverse schematool_changelog for this instead!
 
 current_schema() ->
+    wait_for_mnesia(),
     atomic(
       mnesia:transaction(
 	fun() ->
@@ -593,7 +627,13 @@ get_vsn(V) ->
 tables_of(Key) ->
     Schema = get_schema(Key),
     [ Tab || {table, Tab, _Opts} <- Schema ] ++
-	?schematool_tables.
+	schematool_tables().
+
+schematool_tables() ->
+    ?schematool_tables.
+
+schematool_table_type() ->
+    disc_copies.
 
 %% Migration from K0 to K1:
 %%
