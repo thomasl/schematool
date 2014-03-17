@@ -2,19 +2,12 @@
 #
 # Return the current hostname for your
 # operating system.
-#
-# UNFINISHED
-# - OSX: returns things like foo.local which we chop off, should we
-#   keep the .local?
 
 use Config;
 
 my $os = $Config{osname};
 if ($os == "darwin") {
-    my @res = `hostname -f`;
-    my $long_host = @res[0];
-    $long_host =~ s/.local$//;
-    print STDOUT $long_host;
+    system("hostname -f");
 } elsif ($os == "linux") {
     ## untested, could also be 'hostname --long'
     ## - should return the FQDN
