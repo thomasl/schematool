@@ -527,16 +527,19 @@ storage_type(Type, Opts, Dict) ->
       Dict,
       get_all_values(Type, Opts)
      ).
-    
 
 %% Instructions to alter storage type of table.
 %% - first case = no change, hopefully common
 %% - second and third: not sure, may be error cases
 %%   * we do add/del_table_copy for now
+%%   * basically, case 2 = no type in prev schema
+%%     case 3 = no type in next schema
 %% - fourth is actual change
 %%
 %% UNFINISHED
 %% - are cases 2/3 errors instead? investigate
+%% - should ping the Node before add/del
+%%   (to get better error messages)
 
 alter_storage(_Tab, {_Node, {Type, Type}}) ->
     %% No change
