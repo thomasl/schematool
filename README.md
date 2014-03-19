@@ -1,13 +1,19 @@
 Schematool
 ==========
 
-Helpful tools to generate, maintain and evolve a mnesia schema.
+Model-based tool for generating, maintaining and evolving a mnesia schema.
 
-The mnesia schema is usually managed ad hoc inside various
-erlang modules and scripts. Schematool provides a way to instead
-manage the schema as a data structure.
+Mnesia by default provides a collection of functions to manage the
+mnesia database, an approach we call _script-based_. A schematool user
+instead defines the schema as a data structure, which is called a
+_model-based_ approach, or declarative approach. In the model-based
+approach, the user only specifies what the system should look like
+(the model), while schematool figures out how to get there.
 
-STATUS: tool chain unfinished.
+Schematool is used to create an initial mnesia database as well as to evolve
+it (through a sequence of schemas) and manage it. 
+
+STATUS: Tool chain unfinished. But getting there.
 
 Installation
 ----------
