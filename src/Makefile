@@ -49,6 +49,7 @@ BEHAVIOUR_SRC= \
 
 SCHEMATOOL_MODS= \
 	schematool \
+	schematool_admin \
 	schematool_backup \
 	schematool_frag \
 	schematool_table \

@@ -22,3 +22,10 @@
 %% action = one of the above, defined by schematool.erl
 
 -record(schematool_changelog, {datetime, action}).
+
+%% Various config/status items
+%%
+%% Most important:
+%%  current_schema
+
+-record(schematool_config, {key, value}).

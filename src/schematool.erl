@@ -93,13 +93,12 @@
 %%   creating the schema
 %%   * also, current node doesn't have to be a member
 
--module(schematool).
+-module(schematool2).
 -export(
-   [module/1,
-    create_schema/1,
+   [
+    create_schema/2,
     load_schema/1,
-    diff/2,
-    diff_modules/2
+    diff/2
    ]).
 
 -export([view_schemas/0,
@@ -117,596 +116,45 @@
 
 -include("schematool.hrl").
 
--define(schematool_tables, 
-	[schematool_info, schematool_changelog, schema]).
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
--spec schematool:module(module()) -> any().
--spec schematool:create_schema(schema()) -> any().
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
--export_type([schema/0]).
-
--type schema() :: [schema_item()].   %% The main type of interest
-
--type schema_item() :: 
-     {nodes, [node_name()]}
-   | {table, table_name(), [table_opt()]}.
-
--type node_name() :: node().
--type table_name() :: atom().
--type table_opt() :: term().   %% could be more precise
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%
-%% Typical usage:
-%% $ (generate schemamod using schematool)
-%% $ $SCHEMATOOL_BIN/create-schema.pl --schema foo --node a@localhost 
-%%
-%% where
-%%   foo is usually a module (name) created by schematool
-%%
-%% After creating the schema, start the node with the given nodename:
-%%
-%% $ erl -name a@localhost
-%%
-%% (+ add your other erlang options of course)
-%%
-%% Note that we only use long names, -sname verboten.
-
-create_schema(M) ->
-    Schema = module(M),
-    io:format("Schema: ~p\n", [Schema]),
-    io:format("Creating ...\n", []),
-    cr_schema(Schema).
-
-%% Given the module or filename, retrieve the schema or exit.
-%%
-%% Note: we try to handle both when invoked from cmdline and
-%% inside a program, and when given atoms or strings.
-
-module([M]) when is_atom(M) ->
-    module(M);
-module(M) when is_atom(M) ->
-    File = filename(M),
-    consult(File);
-module(File) when length(File) >= 0 ->
-    %% ASSUME string, try to open variants
-    consult_one([File, File++".schema.term", File ++ ".term"]);
-module(M) ->
-    exit({module_or_filename_not_handled, M}).
-
-%% The default schema file of module is module.schema.term
-
-filename(A) when is_atom(A) ->
-    lists:flatten([atom_to_list(A), ".schema.term"]).
-
-consult_one([F|Fs]) ->
-    case catch consult(F) of
-	{'EXIT', Rsn} ->
-	    consult_one(Fs);
-	Res ->
-	    Res
-    end;
-consult_one([]) ->
-    %% or something more useful?
-    exit({error, enoent}).
-
-%% Read the schema file if possible.  Only permit one schema in a
-%% file.
-
-consult(F) ->
-    case file:consult(F) of
-	{ok, [Schema]} ->
-	    Schema;
-	{ok, [Schema|_]} ->
-	    exit({multiple_schemas_in_file, F});
-	Err ->
-	    exit(Err)
-    end.
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%
-%% Initialize the current node using the defined schema.
-%%
-%% Note that mnesia is a little finicky. We need to load mnesia
-%% before schema is created, but not start it. We need to start
-%% mnesia before creating the tables though.
-%% 
-%% If the current node is not part of the schema, then skip creating
-%% schema or tables. This is helpful when we just want to run the same
-%% scripts for all nodes regardless of whether they run mnesia or not.
-%%
-%% UNFINISHED
-%% - no error checking, e.g., db already exists
-%% - maybe application:stop(mnesia) afterwards?
-%% - more printouts
-%% - run creation in txn and fail if some part fails
-
-cr_schema(Schema) ->
-    application:load(mnesia),
-    Nodes = get_nodes(Schema),
-    if
-	Nodes == [] ->
-	    io:format("No nodes found, stopping\n",[]);
-	true ->
-	    require_all_nodes_up(Nodes),
-	    io:format("- schema for nodes ~p\n", [Nodes]),
-	    case lists:member(node(), Nodes) of
-		true ->
-		    case mnesia:create_schema(Nodes) of
-			{error, Rsn} ->
-			    io:format("Unable to create fresh schema ~p: ~p\n", [Nodes, Rsn]);
-			ok ->
-			    %% Now create the tables and do whatever other setup
-			    %% is needed
-			    start_mnesia_all_nodes(Nodes),
-			    create_schematool_info(Nodes, Schema),
-			    lists:foreach(
-			      fun({table, Tab, Opts0}) ->
-				      %% check return value
-				      Opts = schematool_options:without(Opts0),
-				      io:format("Create table ~p ~p-> ~p\n", 
-						[Tab, Opts, mnesia:create_table(Tab, Opts)]);
-				 (Other) ->
-				      %% skip non-table items
-				      ok
-			      end,
-			      Schema),
-			    mnesia:info(), %% show status, a bit messy
-			    %% application:stop(mnesia),
-			    ok
-		    end;
-		false ->
-		    %% Current node is NOT part of schema,
-		    %% do not create tables
-		    %% - warning or log this? verbose option, could
-		    %%   be annoying to run in scripts otherwise
-		    io:format("- current node ~p is not among mnesia nodes ~p, stop\n", [node(), Nodes]),
-		    ok
-	    end
-    end.
-
-%% Ensure that all nodes in Ns are connected or exit.
-%%
-%% NB: would be nice to also have a tool for STARTING the nodes on all the remote hosts
-%%  sigh
-
-require_all_nodes_up(Ns0) ->
-    Ns = lists:sort(Ns0),
-    Nodes = lists:sort(nodes()),
-    case Ns == Nodes of
-	true ->
-	    ok;
-	false ->
-	    %% ping all nodes in Ns but not in nodes()
-	    %% - if ping fails, the whole thing fails
-	    lists:foreach(
-	      fun(N) ->
-		      case lists:member(N, Nodes) of
-			  true ->
-			      ok;
-			  false ->
-			      case net_adm:ping(N) of
-				  pong ->
-				      ok;
-				  pang ->
-				      exit({unable_to_connect_to_node, N})
-			      end
-		      end
-	      end,
-	      Ns)
-    end.
-
-%% 
-
-get_nodes(Schema) ->
-    [ node_name_of(N) || N <- proplists:get_value(nodes, Schema, [node()]) ].
+install(Nodes) ->
+    schematool_admin:install(Nodes).
 
 %% OBSOLETE
-%% - only Node = atom() permitted for now
+%% - (load + migrate) as an action
 
-node_name_of({Node, _Startup}) ->
-    Node;
-node_name_of(Node) when is_atom(Node) ->
-    Node.
+create_schema(Nodes, File) ->
+    install(Nodes),
+    Schema_key = load_schema(File),
+    schematool_admin:migrate_to(Schema_key).
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Start nodes locally
-%%
-%% Intended for testing: start nodes locally
-%%
-%% Example:
-%%   start_local_nodes([a,b], Host, "erl -detached -pa ../ebin -name ~p").
-%%
-%% UNFINISHED
-%% - can be used to start nodes remotely with the right ssh or whatever
-%%   * I think node starting should be done by epmd ...
-%%     = start epmd on all hosts
-%%     = config to run as appropriate user in appropriate place
-%%       (in a jail or something) [associated with cookie?]
-%%     = start nodes with os:cmd when so ordered by someone
-%% - use 'slave' module?
-%%   * would be better if epmd could do it...
-%%     = use erlpmd library to manage this on one node
-%%       * permissions for cookie to start node
-%%     = erlpmd starts slaves with the proper cookies etc
-%%     = nodes can also start and connect with erlpmd the usual way
-
-start_local_nodes(Startup, SNames) ->
-    %% PORTABILITY: this works on OS/X (Mavericks)
-    Host = lists:flatten(os:cmd("hostname -s")),
-    start_local_nodes(SNames, Host, Startup).
-
-start_local_nodes(Startup, Host, SNames) ->
-    lists:foreach(
-      fun(SName) ->
-	      %% 1/ ping node, if up we're done
-	      %% 2/ 
-	      %% 
-	      %% (a bit wasteful to construct this atom, but
-	      %% I want to make the format string natural)
-	      Name = list_to_atom(
-		       lists:flatten(
-			 io_lib:format("~p@~p", [SName, Host]))),
-	      Cmd = lists:flatten(io_lib:format(Startup, [Name])),
-	      io:format("'~s' -> ~p\n", [Cmd, os:cmd(Cmd)])
-      end,
-      SNames).
-
-%% Stop node N.
-%%
-%% Mostly intended for testing, but can be used whenever
-
-stop_node(N) ->
-    rpc:call(N, init, stop, []).
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Start mnesia on all nodes
-%%
-%% - no checking of return value, is that good?
-%% - should we use rpc:multicall instead and look over the
-%%   results en masse?
-
-start_mnesia_all_nodes(Ns) ->
-    lists:foreach(
-      fun(N) ->
-	      io:format(
-		"start mnesia ~p -> ~p\n", 
-		[N, rpc:call(N, application, ensure_all_started, [mnesia])]
-	       )
-      end,
-      Ns).
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Store the current and previous schema versions.
-%%
-%% The key is {{YYYY, MM, DD}, {H, M, S}}.
-%%
-%% UNFINISHED
-%% - how do we UPGRADE/MIGRATE these hidden tables?
-%% - use erlang:now() instead of datetime?
-%%   + store datetime as readable string/binary field
-%% - should we wrap this in a txn?
-
--define(schematool_info, schematool_info).
--define(schematool_changelog, schematool_changelog).
-
-create_schematool_info(Nodes, Schema) ->
-    Datetime = calendar:universal_time(),
-    create_schematool_info(Datetime, Nodes, Schema).
-
-%% Create and store the relevant schematool info for later use.
-%% Table is currently stored on all nodes.
-
-create_schematool_info(Datetime, Nodes, Schema) ->
-    io:format("Create schematool table -> ~p\n", 
-	      [mnesia:create_table(?schematool_info, 
-				   [{type, ordered_set}, 
-				    {disc_copies, Nodes},
-				    {attributes, 
-				     record_info(fields, schematool_info)}])]),
-    io:format("Create schematool changelog -> ~p\n", 
-	      [mnesia:create_table(?schematool_changelog, 
-				   [{type, ordered_set}, 
-				    {disc_copies, Nodes},
-				    {attributes, 
-				     record_info(fields, schematool_changelog)}])]),
-    case mnesia:transaction(
-	   fun() ->
-		   z_add_schema_info(Datetime, Schema)
-	   end) of
-	{atomic, ok} ->
-	    io:format("Write schema info -> ok\n", []);
-	Err ->
-	    io:format("Error when creating schema -> ~p\n",
-		      [Err]),
-	    init:stop(1)
-    end.
-
-%% Return current schema definition (as a #schemainfo record),
-%% or an error.
-%%
-%% Can be used for diff purposes.
-%%
-%% UNFINISHED
-%% - traverse schematool_changelog for this instead!
-
-current_schema() ->
-    wait_for_mnesia(),
-    atomic(
-      mnesia:transaction(
-	fun() ->
-		Key = mnesia:last(schematool_info),
-		[Rec] = mnesia:read(schematool_info, Key),
-		Rec
-	end)).
-
-%% - would be nice if we could retry txn as well
-
-atomic({atomic, Res}) ->
-    Res;
-atomic(Err) ->
-    Err.
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%
-%% Load a new schema from module M. Note: this does NOT upgrade/migrate
-%% yet, and MAY be problematic (since it will show up as the latest schema).
-%%
-%% Thus, mainly intended for TESTING at this time.
-%%
-%% [schematool should mark the node with the currently active schema,
-%% with 0,1 or more schema versions loaded after it. How should those
-%% schemas be treated? They are basically tentative, but probably don't
-%% form a chain; perhaps unrelated.]
-
-load_schema(M) ->
-    Schema = module(M),
-    wait_for_mnesia(),
-    case mnesia:transaction(
-	   fun() ->
-		   %% will abort if schematool_info does not exist
-		   mnesia:table_info(schematool_info, attributes),
-		   add_schema_info(Schema)
-	   end) of
-	{atomic, Res} ->
-	    Res;
-	Err ->
-	    io:format("Error when loading schema: ~p\n"
-		      "Has the node been initialized?\n", 
-		      [Err]),
-	    Err
-    end.
-
-%% UNFINISHED
-%% - check return value ensure_all_started
-%% - the MaxWait constant is icky
-
-wait_for_mnesia() ->
-    {ok, _} = application:ensure_all_started(mnesia),
-    MaxWait = 5000,
-    ok = mnesia:wait_for_tables([schematool_info, schematool_changelog], MaxWait).
-
-%% Add a new schema definition to schematool_info. Note
-%% that this is just one part of migrating the schema.
-%%
-%% We currently use Datetime as the key, but should
-%% perhaps use erlang:now() instead. The datetime
-%% should always be universaltime() to avoid timezone issues.
-%% (See add_schema_info/1.)
-%% 
-%% UNFINISHED
-%% - pass origin as
-%%    {Absfilename::binary(), Mtime::datetime()}
-%%   this should be returned when consulting the file
-%%   (from module/1)
-%%   * origin is used to detect when the same file is
-%%     being loaded
-%%   * alternative: use filesize+SHA1 if you're feeling
-%%     paranoid
-
-add_schema_info(Schema) ->
-    Datetime = calendar:universal_time(),
-    Origin = undefined,
-    z_add_schema_info(Datetime, Schema, Origin).
-
-%% (currently not used, see above for Origin)
-
-add_schema_info(Schema, Origin) ->
-    Datetime = calendar:universal_time(),
-    z_add_schema_info(Datetime, Schema, Origin).
-
-%% (Note: if Datetime is not given in universaltime, 
-%% things get problematically unsorted.)
-%%
-%% UNFINISHED
-%% - undo: should we store {create, Key, Schema} ...?
-%%   that permits user-level undo, at a cost of much more
-%%   garbage? see if there's any demand for that
-%% - refactor this
-%%   * the z_add_schema_info/2 function shouldn't exist ...
-
-z_add_schema_info(Datetime, Schema) ->
-    z_add_schema_info(Datetime, Schema, undefined).
-    
-z_add_schema_info(Datetime, Schema, Origin) ->
-    Vsn = get_version(Schema),
-    warn_if_version_exists(Vsn),
-    mnesia:write(#schematool_info{datetime=Datetime,
-				  vsn=Vsn,
-				  schema=Schema,
-				  origin=Origin}),
-    mnesia:write(#schematool_changelog{datetime=Datetime,
-				       action={create, Datetime}}).
-
-%% Get the vsn attribute, undefined if not found.
-%% - check that there's just one? or leave that to
-%%   a separate phase (later)
-
-get_version(Schema) ->
-    to_binary(proplists:get_value(vsn, Schema)).
-
-%% Convert vsn to binary if set. This is the canonical
-%% form; we do it in particular to avoid cases when some
-%% versions are given as lists, others as binaries.
-%%
-%% We should PERHAPS special-case version given as
-%% tuple of integers and emit <<"X.Y.Z.W...">>. 
-%% This is left for later.
-
-to_binary(undefined) ->
-    undefined;
-to_binary(Lst) when is_list(Lst), length(Lst) >= 0 ->
-    list_to_binary(Lst);
-to_binary(Bin) when is_binary(Bin) ->
-    Bin;
-to_binary(Vsn) ->
-    io:format("Warning: vsn should be binary or list, "
-	      "converting ~p to binary\n", [Vsn]),
-    list_to_binary(io_lib:format("~p", [Vsn])).
-
-%% If the current vsn exists, warn the user. Note
-%% that the schemas can still coexist since they get
-%% different primary keys (datetime).
-%%
-%% NB: this is a full table scan, we rely on there
-%% being few schemas. Add an index on vsn otherwise.
-%% 
-%% UNFINISHED
-%% - pretty-print the datetime?
-
-warn_if_version_exists(undefined) ->
-    ok;
-warn_if_version_exists(Vsn) when is_binary(Vsn) ->
-    Pat = #schematool_info{vsn=Vsn, _='_'},
-    case mnesia:match_object(Pat) of
-	[] ->
-	    ok;
-	[#schematool_info{datetime=DT}] ->
-	    io:format("Warning: a previous schema (vsn ~p) is already "
-		      "loaded (~p)\n",
-		      [Vsn, DT]);
-	PrevSchemas ->
-	    io:format("Warning: Multiple schemas (vsn ~p) are already "
-		      "loaded\n~s\n",
-		      [Vsn,
-		       lists:flatten(
-			 [ io_lib:format(" ~p: ~p\n", [Vsn0, DT])
-			   || #schematool_info{vsn=Vsn0, datetime=DT} <- PrevSchemas ])])
-    end.
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Given a schema key, read the schema.
-
-get_schema(Key) ->
-    atomic(
-      mnesia:transaction(
-	fun() ->
-		[#schematool_info{schema=S}] = 
-		    mnesia:read(schematool_info, Key),
-		S
-	end)).
-
-%% Lookup the schema associated with vsn
-%% - fail if not exactly one schema
-
-get_vsn(V) ->
-    atomic(
-      mnesia:transaction(
-	fun() ->
-		[Schema] = 
-		    mnesia:match_object(#schematool_info{vsn=V, _='_'}),
-		Schema#schematool_info.schema
-	end)).
-
-%% Collect the tables defined by the schema with the given key
-
-tables_of(Key) ->
-    Schema = get_schema(Key),
-    [ Tab || {table, Tab, _Opts} <- Schema ] ++
-	schematool_tables().
-
-schematool_tables() ->
-    ?schematool_tables.
-
-schematool_table_type() ->
-    disc_copies.
-
-%% Migration from K0 to K1:
-%%
-%% 0/  Actions = diff_keys(K0, K1)
-%% 1/  Migrate = migration_fun(Actions)   <-- write this ...
-%% 2/  Tabs = tables_of(K0),
-%% 3/  schematool_backup:migrate(Tabs, Migrate)
-%%
-%% Well, that's it! :-)
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%
-%% Return all the schemas currently stored. Mostly intended for
-%% troubleshooting or testing.
-%%
-%% - badly named? "view_" ...
-%% - should we have a schema prettyprinter? ~p might be enough
+load_schema(File) ->
+    schematool_admin:load_schema_file(File).
 
 view_schemas() ->
-    wait_for_mnesia(),
-    atomic(
-      mnesia:transaction(
-	fun() ->
-		mnesia:foldr(
-		  fun(#schematool_info{} = Schema, Acc) ->
-			  [Schema|Acc]
-		  end,
-		  [],
-		  schematool_info)
-	end)).
+    [ schematool_admin:definition(Key) || Key <- schema_keys() ].
 
 schema_keys() ->
-    wait_for_mnesia(),
-    atomic(
-      mnesia:transaction(
-	fun() ->
-		mnesia:foldr(
-		  fun(#schematool_info{datetime=Key}, Acc) ->
-			  [Key|Acc]
-		  end,
-		  [],
-		  schematool_info)
-	end)).
+    schematool_admin:candidate_schemas().
 
-schema_actions() ->
-    wait_for_mnesia(),
-    atomic(
-      mnesia:transaction(
-	fun() ->
-		mnesia:foldr(
-		  fun(#schematool_changelog{datetime=Key, action=Act}, Acc) ->
-			  [{Key, Act}|Acc]
-		  end,
-		  [],
-		  schematool_changelog)
-	end)).
-
-%% Note: this is a DANGEROUS OPERATION, since you can e.g., delete the
-%% currently used schema and so confuse schematool and yourself. Be
-%% careful.
-%%
-%% - should we store {delete, Key, Schema} for undo? :-)
+get_schema(Key) ->
+    schematool_admin:definition(Key).
 
 delete_schema(Key) ->
-    wait_for_mnesia(),
-    Datetime = calendar:universal_time(),
-    atomic(
-      mnesia:transaction(
-	fun() ->
-		mnesia:delete({schematool_info, Key}),
-		mnesia:write(#schematool_changelog{datetime=Datetime,
-						   action={delete, Key}})
-	end)).
+    schematool_admin:delete_schema(Key).
+
+current_schema() ->
+    schematool_admin:current_schema().
+
+tables_of(Schema_key) ->
+    schematool_admin:tables_of(Schema_key).
+
+schematool_tables() ->
+    exit(nyi).
+
+schematool_table_type() ->
+    exit(nyi).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Diff schema1 and schema2 (old vs new). Foundation for
@@ -720,29 +168,6 @@ delete_schema(Key) ->
 %%
 %% UNFINISHED
 %% - output needs to be massaged
-
-%% diff of schemas in modules M0, M1
-
-diff_modules(M0, M1) ->
-    S0 = M0:schema(),
-    S1 = M1:schema(),
-    diff(S0, S1).
-
-%% The following can only run in a node with
-%% active schematool (= mnesia + schematool_info table)
-
-diff_current(M1) ->
-    S1 = M1:schema(),
-    #schematool_info{schema=S0} = current_schema(),
-    diff(S0, S1).
-
-%% diff_versions(V0, V1)
-%% - V0 and V1 are versions of loaded schemas
-
-diff_versions(V0, V1) ->
-    S0 = get_vsn(V0),
-    S1 = get_vsn(V1),
-    diff(S0, S1).
 
 %% diff of schemas S0, S1
 
@@ -765,6 +190,19 @@ nodediff(S0, S1) ->
     N0 = get_nodes(S0),
     N1 = get_nodes(S1),
     diff_ops(N0, N1).
+
+%% 
+
+get_nodes(Schema) ->
+    [ node_name_of(N) || N <- proplists:get_value(nodes, Schema, [node()]) ].
+
+%% OBSOLETE
+%% - only Node = atom() permitted for now
+
+node_name_of({Node, _Startup}) ->
+    Node;
+node_name_of(Node) when is_atom(Node) ->
+    Node.
 
 %% Generate list of operations to add/delete nodes.
 %%
