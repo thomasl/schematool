@@ -40,6 +40,10 @@
     tables_of/1
    ]
   ).
+-export(
+   [schematool_tables/0,
+    schematool_table_type/0
+   ]).
 -include("schematool.hrl").
 
 %% (Note: schematool_exists() unnecessary if we done wait_for_mnesia before)
@@ -155,7 +159,13 @@ create_schematool_tables(Nodes) ->
 wait_for_mnesia() ->
     {ok, _} = application:ensure_all_started(mnesia),
     MaxWait = 5000,
-    ok = mnesia:wait_for_tables(schematool:schematool_tables(), MaxWait).
+    ok = mnesia:wait_for_tables(?schematool_tables, MaxWait).
+
+schematool_tables() ->
+    ?schematool_tables.
+
+schematool_table_type() ->
+    disc_copies.
 
 %% Used to unwrap transaction results. Can optionally do something
 %% with an error (like printout or exit).
@@ -416,6 +426,8 @@ consult(F0) ->
     F = filename(F0),
     consult_one([F, F++".schema.term", F++".term"]).
 
+filename([A]) when is_atom(A) ->
+    atom_to_list(A);
 filename(A) when is_atom(A) ->
     atom_to_list(A);
 filename(Lst) when is_list(Lst) ->

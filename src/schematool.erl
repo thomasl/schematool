@@ -93,10 +93,11 @@
 %%   creating the schema
 %%   * also, current node doesn't have to be a member
 
--module(schematool2).
+-module(schematool).
 -export(
    [
-    create_schema/2,
+    install/1,
+    load_and_migrate/1,
     load_schema/1,
     diff/2
    ]).
@@ -121,12 +122,8 @@
 install(Nodes) ->
     schematool_admin:install(Nodes).
 
-%% OBSOLETE
-%% - (load + migrate) as an action
-
-create_schema(Nodes, File) ->
-    install(Nodes),
-    Schema_key = load_schema(File),
+load_and_migrate(File) ->
+    Schema_key = schematool_admin:load_schema_file(File),
     schematool_admin:migrate_to(Schema_key).
 
 load_schema(File) ->
@@ -151,10 +148,10 @@ tables_of(Schema_key) ->
     schematool_admin:tables_of(Schema_key).
 
 schematool_tables() ->
-    exit(nyi).
+    schematool_admin:schematool_tables().
 
 schematool_table_type() ->
-    exit(nyi).
+    schematool_admin:schematool_table_type().
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Diff schema1 and schema2 (old vs new). Foundation for
