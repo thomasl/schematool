@@ -57,6 +57,7 @@ SCHEMATOOL_MODS= \
 	schematool_transform \
 	schematool_helper \
 	schematool_options \
+	schematool_verify \
 	schematool_xf
 
 SCHEMATOOL_SRC := $(patsubst %, %.erl, $(SCHEMATOOL_MODS))
