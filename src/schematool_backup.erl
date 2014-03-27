@@ -69,6 +69,11 @@ migrate(Old_Key, Migration) ->
 %% If the migration fails, the fallback is installed and
 %% the nodes are automatically restarted (if fallback is ok).
 %%
+%% Note: the Migration fun cannot be run in a txn, because
+%%  some of the operations are themselves txns and mnesia
+%%  can't handle nested transactions. Therefore, the actions
+%%  inside have to wrap in txns.
+%%
 %% UNFINISHED
 %% - we always use the builtin mnesia_backup, this should
 %%   be adjustable somewhere
@@ -86,7 +91,7 @@ migrate(Opaque, Args0, Tabs, Migration) ->
 		{error, BackErr} ->
 		    io:format("backup_checkpoint failed: ~p\n", [BackErr]);
 		ok ->
-		    case atomic_txn(Migration) of
+		    case catch Migration() of
 			ok ->
 			    io:format("Migration successful\n", []),
 			    mnesia:deactivate_checkpoint(Name);
