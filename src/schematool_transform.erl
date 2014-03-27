@@ -37,8 +37,8 @@
 
 -include("schematool.hrl").
 
--define(dbg(Str, Xs), io:format(Str, Xs)).
-%-define(dbg(Str, Xs), ok).
+%-define(dbg(Str, Xs), io:format(Str, Xs)).
+-define(dbg(Str, Xs), ok).
 
 %% Record definitions look like:
 %%   {RecName :: atom(), [ attr() ]}
@@ -107,17 +107,18 @@ table(Tab, Old, New) ->
 %%
 %% UNFINISHED
 %% - indexes updated elsewhere
+%% - could call mnesia:transform_table/3 if New_rec unchanged
+%%   (does that help?)
 
 table(Tab, Xforms, Old, New = {New_rec, New_attr_dflts}) ->
     New_attrs = attr_names(New_attr_dflts),
     mnesia:transform_table(
       Tab, 
-      fun(Rec, Acc) ->
+      fun(Rec) ->
 	      KVs = rec_kv(Old, Rec),
 	      NewKVs = xforms(Xforms, KVs),
 	      NewRec = kv_rec(New, KVs),
-	      mnesia:write(Tab, NewRec, write),
-	      Acc+1
+	      NewRec
       end,
       New_attrs,
       New_rec).
@@ -256,7 +257,7 @@ get_attr(Attr, KVs) when is_atom(Attr) ->
 get_attr(Attr, Dflt, [{Attr, Val}|_]) ->
     Val;
 get_attr(Attr, Dflt, [_|Xs]) ->
-    get_attr(Attr, Xs);
+    get_attr(Attr, Dflt, Xs);
 get_attr(Attr, Dflt, []) ->
     Dflt.
 
