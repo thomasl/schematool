@@ -21,10 +21,12 @@
 %%
 %% STATUS:
 %% - seems to work, at least up to migrations
-%% - add functions so we can manage from command line / Make
-%%   * in particular, key name of initial schema ...)
-%%     (or do we add the version field again?)
-%%   * 
+%% - table transformation:
+%%   1/ abort due to nested txn (ugh)
+%%   2/ abort due to bad transform fun from cmdline
+%% - MERGE schemas => each app can have a schema which
+%%   we then mash together (safely)
+%%   * error if conflict + some way to check beforehand
 
 -module(schematool_admin).
 -export(
@@ -56,6 +58,9 @@
 	  ErrFun)).
 
 -define(schematool_tables, [schematool_info, schematool_changelog, schematool_config]).
+
+-define(dbg(Str, Xs), io:format(Str, Xs)).
+%% -define(dbg(Str, Xs), ok).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Run this to initialize schematool (only) on the specified nodes.
@@ -266,7 +271,7 @@ make_key() ->
     {{Y, M, D}, {HH, MM, SS}} = calendar:universal_time(),
     TZ = "Z",
     list_to_binary(
-      io_lib:format("~4.4.0w-~2.2.0w-~2.2.0wT~2.2.0w:~2.2.0w:~2.2.0w~s\n", 
+      io_lib:format("~4.4.0w-~2.2.0w-~2.2.0wT~2.2.0w:~2.2.0w:~2.2.0w~s", 
 		    [Y, M, D, HH, MM, SS, TZ])
      ).
 
@@ -347,15 +352,17 @@ install_schema(Schema) ->
 migrate_schema(Old_key, New_key) ->
     Old = definition(Old_key),
     New = definition(New_key),
-    Tabs = tables_of(Old_key),
+    %% io:format("Old key = ~p\nNew key=~p\n", [Old_key, New_key]),
+    %% io:format("Old schema = ~p\nNew schema=~p\n", [Old, New]),
     Actions = schematool:diff(Old, New),
-    schematool_backup:migrate(Tabs, migration_fun(Actions)).
+    schematool_backup:migrate(Old_key, migration_fun(Actions)).
 
 %% This one should interpret the Actions to complete the migration,
 %% print what's going on and fail/exit if you can't do it
 %%  (That will trigger rollback.)
 
 migration_fun(Actions) ->
+    io:format("Migration fun of actions ~p\n", [Actions]),
     fun() ->
 	    perform_actions(Actions)
     end.
@@ -365,18 +372,35 @@ migration_fun(Actions) ->
 %% - should also print comments appropriately, etc
 %% - match return values?
 
-perform_actions(Actions) ->
+perform_actions(Categories) ->
+    lists:foreach(fun perform_action/1, Categories).
+
+perform_action({nodes, Ns}) ->
+    io:format("Category nodes SKIPPED\n Action list: ~p\n",
+	      [Ns]);
+perform_action({tables, Actions}) ->
+    io:format("Category Tables:\n", []),
     lists:foreach(
-      fun({M, F, Args}) ->
+      fun({comment, Str}) ->
+	      io:format("%% ~s\n", [Str]);
+	 ({M, F, Args}) ->
 	      Res = (catch erlang:apply(M, F, Args)),
-	      io:format("~p:~p ~p -> ~p\n",
-			[M, F, Args, Res]),
+	      ?dbg("~p:~p ~p -> ~p\n",
+		   [M, F, Args, Res]),
 	      case Res of
 		  {'EXIT', Rsn} ->
 		      exit(Rsn);
+		  {aborted, Err} ->
+		      %% assumes this is an aborted embedded txn, stop here
+		      exit(Err);
 		  _ ->
 		      Res
-	      end
+	      end;
+	 ({txn, {M, F, As}}) ->
+	      ?txn_or_err(
+		 erlang:apply(M, F, As),
+		 fun(Err) -> io:format("Transaction failed: ~p\n", [Err]) end
+		)
       end,
       Actions).
 
@@ -395,13 +419,12 @@ write_schema_info(Schema) ->
     Datetime = make_key(),
     write_schema_info(Datetime, Schema).
 
-write_schema_info(Datetime, Schema) ->
-    mnesia:write(#schematool_info{datetime=Datetime,
+write_schema_info(SchemaKey, Schema) ->
+    mnesia:write(#schematool_info{datetime=SchemaKey,
 				  schema=Schema}),
-    mnesia:write(#schematool_changelog{datetime=Datetime,
-				       action={create, Datetime}}),
-    Datetime.
-
+    mnesia:write(#schematool_changelog{datetime=SchemaKey,
+				       action={create, SchemaKey}}),
+    SchemaKey.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Strictly internal functions (or you risk messing it all up). in txn.
@@ -457,3 +480,17 @@ consult_schema(F) ->
 	    exit(Err)
     end.
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+view_history() ->
+    wait_for_mnesia(),
+    ?txn(
+       mnesia:foldl(
+	 fun(#schematool_changelog{datetime=DT, action=A}, Acc) ->
+		 io:format("~s -> ~p\n", [DT, A]),
+		 Acc
+	 end,
+	 0,
+	 schematool_changelog)).
+
+	      

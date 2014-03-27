@@ -67,31 +67,22 @@
 %%   on two nodes, do the song-and-dance)
 
 %% STATUS
-%% - still early days, but (a) creates schema from spec
-%%   and (b) generates reasonable migration plan from
-%%   schema diffs (diff/2)
-%% - schema versions are kept in schematool_info
-%%   and the changes are kept in schematool_changelog
-%% - find current schema by looking at changelog
+%% - creates schema from spec routinely (on 1 node)
+%% - plausible migration plans generated
+%% - performed a 1-record layout transformation
+%%   * black triangle day :-)
+%%   * does NOT properly detect that migration failed
 %%
 %% UNFINISHED
-%% - loaded schemas with existing vsn => warning
-%%   use {vsn, "foo"} attribute
-%%   * vsn = undefined skipped
-%%   * lookup by vsn
-%% - reuse schema
+%% - reuse parametrized schema
 %%   * with renamed nodes (everywhere)
 %%   * extended (= explicit diff)
 %% - derive schema by checking mnesia
 %% - verify schema (derived vs latest)
 %% - repair schema: diff
-%% - nodes should (perhaps) be specified as
-%%    {NodeName, Startup}
-%%   e.g.,
-%%    {'a@hostname', "erl -pa ../ebin -name ..."}
-%%   this way we can ensure that they're all started when
-%%   creating the schema
-%%   * also, current node doesn't have to be a member
+%% - MERGE multiple schemas into one
+%%   * each app can have its own schema
+%%   * detect clashes (esp. table names)
 
 -module(schematool).
 -export(
@@ -144,6 +135,11 @@ delete_schema(Key) ->
 current_schema() ->
     schematool_admin:current_schema().
 
+history() ->
+    schematool_admin:view_history().
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
 tables_of(Schema_key) ->
     schematool_admin:tables_of(Schema_key).
 
@@ -167,6 +163,12 @@ schematool_table_type() ->
 %% - output needs to be massaged
 
 %% diff of schemas S0, S1
+%%
+%% The diff is a list of
+%%  {nodes, Change}
+%%  {tables, Change}
+%%
+%% NB: not sure if the nodes diff is interesting anymore?
 
 diff(S0, S1) ->
     N = nodediff(S0, S1),
