@@ -52,7 +52,7 @@ node_available(N) ->
 
 add_schema_node(N) ->
     true = node_available(N),
-    TabType = schematool:schematool_table_type(),
+    TabType = schematool_admin:schematool_table_type(),
     lists:foreach(
       fun(Tab) ->
 	      case mnesia:add_table_copy(
@@ -71,7 +71,7 @@ add_schema_node(N) ->
 		      exit(nyi)
 	      end
       end,
-      schematool:schematool_tables()
+      schematool_admin:schematool_tables()
      ).
 
 % {aborted,{already_exists,schematool_info,_}}
@@ -96,7 +96,7 @@ delete_schema_node(N) ->
 		      exit(nyi)
 	      end
       end,
-      schematool:schematool_tables()).
+      schematool_admin:schematool_tables()).
     
 %% Input: lists of nodes
 %% Output: {Added, Remaining, Deleted},

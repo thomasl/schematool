@@ -48,7 +48,7 @@ migrate(Old_Key, Migration) ->
 	       io_lib:format("schematooltmp-~p-~p-~p.bup",
 			     [A,B,C])),
     Args = [],
-    Tabs = schematool:tables_of(Old_Key),
+    Tabs = schematool_admin:tables_of(Old_Key),
     migrate(Opaque, Args, Tabs, Migration).
 
 %% Status: trivial migration seems to work, mostly

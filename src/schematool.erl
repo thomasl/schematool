@@ -90,6 +90,7 @@
     install/1,
     load_and_migrate/1,
     load_schema/1,
+    migrate_to/1,
     diff/2
    ]).
 
@@ -99,12 +100,6 @@
 	 delete_schema/1,
 	 current_schema/0
 	]).
-
--export(
-   [tables_of/1,
-    schematool_tables/0,
-    schematool_table_type/0
-   ]).
 
 -include("schematool.hrl").
 
@@ -119,6 +114,9 @@ load_and_migrate(File) ->
 
 load_schema(File) ->
     schematool_admin:load_schema_file(File).
+
+migrate_to(Schema_key) ->
+    schematool_admin:migrate_to(Schema_key).
 
 view_schemas() ->
     [ schematool_admin:definition(Key) || Key <- schema_keys() ].
@@ -137,17 +135,6 @@ current_schema() ->
 
 history() ->
     schematool_admin:view_history().
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-tables_of(Schema_key) ->
-    schematool_admin:tables_of(Schema_key).
-
-schematool_tables() ->
-    schematool_admin:schematool_tables().
-
-schematool_table_type() ->
-    schematool_admin:schematool_table_type().
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Diff schema1 and schema2 (old vs new). Foundation for

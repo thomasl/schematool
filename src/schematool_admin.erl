@@ -360,6 +360,9 @@ migrate_schema(Old_key, New_key) ->
 %% This one should interpret the Actions to complete the migration,
 %% print what's going on and fail/exit if you can't do it
 %%  (That will trigger rollback.)
+%%
+%% UNFINISHED
+%% - refactor, what's the proper place for this?
 
 migration_fun(Actions) ->
     io:format("Migration fun of actions ~p\n", [Actions]),
@@ -369,8 +372,8 @@ migration_fun(Actions) ->
 
 %% Perform the migration actions
 %%
-%% - should also print comments appropriately, etc
-%% - match return values?
+%% UNFINISHED
+%% - compile instead? can match properly
 
 perform_actions(Categories) ->
     lists:foreach(fun perform_action/1, Categories).
@@ -405,6 +408,8 @@ perform_action({tables, Actions}) ->
       Actions).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%
+%% Tables used in the specified schema.
 
 tables_of(Schema_key) ->
     Schema = def(Schema_key),

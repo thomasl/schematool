@@ -137,13 +137,22 @@ attr_names([]) ->
 %%
 %% {attr, A, PrevA}: copy A := PrevA
 %% {attr, A, Fun}: Fun(Val, KVs) -> NewVal, replaces value of A
-%% {rec, Fun}: Fun(KVs) -> NewKVs, updates the list of key-values
+%%   A := Fun(OldVal(A), KVs)
+%%   examples:
+%%    {attr, foo, fun(Prev, _) -> Prev+1 end}
+%%      increments attribute 'foo' by 1
+%%    {attr, foo, fun(Prev, KVs) -> Prev+value(bar, KVs) end}
+%%      foo is set to the sum of foo and bar
+%% {rec, Fun}: Fun(KVs) -> NewKVs, updates the entire list of key-values
 %%
 %% (Global transforms {db, Fun} are specified at the schema level.)
 %%
 %% NOTE: attributes A are not restricted to attribute names,
 %%  we can use them as temp variables too. But the final record
 %%  is constructed from the new record definition's attributes.
+%%
+%% NOTE: we should define helpers for writing xforms, esp. value()
+%%  and/or a lib of macros, might be more concise (no module prefix)
 %%
 %% NOTE: simple attribute copying could be done at ZERO runtime cost
 %%  by renaming attribute A to access the position of PrevA!
