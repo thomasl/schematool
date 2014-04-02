@@ -5,6 +5,13 @@
 ##  (make tests)
 ## 
 ## NB: does not use smart_exceptions, etc.
+##
+## Structure:
+## - Binaries written to ./ebin to not pollute
+##   the "standard" ../ebin
+## - Data (such as schema definitions) found
+##   in ./data/
+## - currently mixes tests and libraries
 
 SCHEMATOOL_INC_DIR=../include
 SCHEMATOOL_SRC_DIR=../src
@@ -18,7 +25,7 @@ ERLC_OPTS= \
 	-pa ../ebin \
 	-I../ebin \
 	-I$(SCHEMATOOL_INC_DIR) \
-	-o ../ebin \
+	-o ./ebin \
 	+export_all
 
 HRL_SRC= \
@@ -28,7 +35,8 @@ BEHAVIOUR_SRC= \
 SCHEMATOOL_MODS= \
 	alter_nodes_1 \
 	alter_nodes_2 \
-	alter_table_1
+	alter_table_1 \
+	simple_tests
 
 SCHEMATOOL_SRC := $(patsubst %, %.erl, $(SCHEMATOOL_MODS))
 SCHEMATOOL_TESTS := $(patsubst %, %.TOUCH, $(SCHEMATOOL_MODS))
