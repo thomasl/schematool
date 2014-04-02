@@ -265,14 +265,25 @@ delete_schema(Schema_key) ->
     end.
 
 %% When a schema is loaded, it gets a key which is the universal (UTC) datetime of
-%% the load. We prettyprint it in ISO XXXX format to make it less awful.
+%% the load. We prettyprint it in extended ISO XXXX format to make it less awful.
+%%
+%% The key looks like 
+%%  <<"2014-04-02T14:18:58.61902Z">>
+%% where 61902 are the microseconds of the now() value.
+%%
+%% Why do we not just use the datetime (like a previous version did)?
+%% We require this detailed key for TESTING purposes -- we want to
+%% load many schemas quickly, but this requires a better resolution than
+%% seconds. (Furthermore, erlang:now/0 even ensures uniqueness of values;
+%% possibly excluding clock drift/catchup.)
 
 make_key() ->
-    {{Y, M, D}, {HH, MM, SS}} = calendar:universal_time(),
+    Now = {_MSec, _Sec, USec} = erlang:now(),
+    {{Y, M, D}, {HH, MM, SS}} = calendar:now_to_universal_time(Now),
     TZ = "Z",
     list_to_binary(
-      io_lib:format("~4.4.0w-~2.2.0w-~2.2.0wT~2.2.0w:~2.2.0w:~2.2.0w~s", 
-		    [Y, M, D, HH, MM, SS, TZ])
+      io_lib:format("~4.4.0w-~2.2.0w-~2.2.0wT~2.2.0w:~2.2.0w:~2.2.0w.~w~s", 
+		    [Y, M, D, HH, MM, SS, USec, TZ])
      ).
 
 %% Returns the schema definition of the schema key.
