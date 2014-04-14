@@ -31,6 +31,8 @@
 -module(schematool_admin).
 -export(
    [install/1,
+    uninstall/0,
+    is_installed/0,
     candidate_schemas/0,
     load_schema_def/1,
     load_schema_definition/1,
@@ -39,9 +41,17 @@
     definition/1,
     migrate_to/1,
     delete_schema/1,
+    delete/0,
     tables_of/1
    ]
   ).
+-export(
+   [consult/1]
+  ).
+-export(
+   [full_delete_allowed/0,
+    allow_full_delete/1
+   ]).
 -export(
    [schematool_tables/0,
     schematool_table_type/0
@@ -83,8 +93,7 @@ install(Nodes) ->
 	    %% is needed
 	    start_mnesia_all_nodes(Nodes),
 	    create_schematool_tables(Nodes),
-	    %% printout
-	    mnesia:info()
+	    ok
     end.
 
 %% Make sure all specified nodes are connected to this one.
@@ -183,8 +192,28 @@ atomic({atomic, Res}, Fail) ->
 atomic(Err, Fail) ->
     Fail(Err).
 
+%% Is schematool installed? Can be used outside transactions.
+%%
+%% NB: wait_for_mnesia is usually better.
+
+is_installed() ->
+    ?txn_or_err(
+       begin
+	   Xs = mnesia:table_info(schematool_info, attributes),
+	   if
+	       is_list(Xs) ->
+		   true;
+	       true ->
+		   fase
+	   end
+       end,
+       fun(Err) ->
+	       false
+       end).
+
 %% Used inside txn to check that schematool has been installed.
-%% Aborts if schematool_info does not exist
+%% ABORTS if schematool_info does not exist. Return value is
+%% something if schematool_info exists.
 %%
 %% NOTE: if you've done wait_for_mnesia() before, then this will
 %%  always succeed. Seldom useful.
@@ -229,7 +258,9 @@ load_schema_definition(Schema) ->
        end).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Lookup the current schema (key) in use. Fails if no schema installed.
+%% Lookup the current schema (key) in use. 
+%%  If there is no schema, returns 'undefined'.
+%%  If schematool is not initialized, fails in wait_for_mnesia().
 
 current_schema() ->
     wait_for_mnesia(),
@@ -239,7 +270,7 @@ current_schema() ->
 	   Curr
        end,
        fun(Err) ->
-	      not_found
+	      undefined
        end).
 
 %% Delete a candidate schema. Fails if schema does not exist
@@ -348,7 +379,7 @@ install_schema(Schema) ->
 	      Opts = schematool_options:without(Opts0),
 	      io:format("Create table ~p ~p -> ~p\n",
 			[Tab, Opts,
-			 mnesia:create_table(Tab, Opts)]);
+			 {atomic, ok} = mnesia:create_table(Tab, Opts)]);
 	 (_Other) ->
 	      %% Skip other options
 	      ok
@@ -443,6 +474,39 @@ write_schema_info(SchemaKey, Schema) ->
     SchemaKey.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%
+%% Uninstall schematool, ie delete the tables.
+%% 
+%% 
+
+uninstall() ->
+    case full_delete_allowed() of
+	true ->
+	    Fails = 
+		lists:foldl(
+		  fun(Tab, Fails) ->
+			  case mnesia:delete_table(Tab) of
+			      {atomic, ok} ->
+				  Fails;
+			      {aborted, Res} ->
+				  io:format("delete ~p -> ~p\n",
+					    [Tab, Res]),
+				  [Tab|Fails]
+			  end
+		  end,
+		  [],
+		  ?schematool_tables),
+	    if
+		Fails == [] ->
+		    ok;
+		true ->
+		    {error, {delete_failed, Fails}}
+	    end;
+	false ->
+	    {error, full_delete_not_permitted}
+    end.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Strictly internal functions (or you risk messing it all up). in txn.
 
 get_current_schema() ->
@@ -456,6 +520,44 @@ get_current_schema() ->
 set_current_schema(Schema_key) ->
     mnesia:write(#schematool_config{key=current_schema,
 				    value=Schema_key}).
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Delete the current installed schema, that is, all tables.
+%%
+%% Our approach: load an empty schema, migrate to it. Zap.
+%%
+%% This is probably just suitable for testing.
+%%
+%% DANGEROUS - you need to run ?MODULE:allow_full_delete(true) before
+%%  this operation is permitted
+
+delete() ->
+    case current_schema() of
+	undefined ->
+	    ok;
+	CurrKey ->
+	    case full_delete_allowed() of
+		true ->
+		    EmptySchema = [],
+		    EmptyKey = load_schema_def(EmptySchema),
+		    migrate_schema(CurrKey, EmptyKey);
+		false ->
+		    {error, delete_not_allowed}
+	    end
+    end.
+
+full_delete_allowed() ->
+    ?txn_or_err(
+       begin
+	   [#schematool_config{value=Bool}] = mnesia:read(schematool_config, full_delete_allowed),
+	   Bool
+       end,
+       fun(_Err) ->
+	       false
+       end).
+
+allow_full_delete(Bool) when Bool == true ;	Bool == false ->
+    ?txn(mnesia:write(#schematool_config{key=full_delete_allowed, value=Bool})).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -474,7 +576,9 @@ filename(Lst) when is_list(Lst) ->
 
 consult_one([F|Fs]) ->
     case catch consult_schema(F) of
-	{'EXIT', _Rsn} ->
+	{'EXIT', Rsn} ->
+	    %% io:format("Tried to read ~p, failed with ~p\n",
+	    %% [F, Rsn]),
 	    consult_one(Fs);
 	Res ->
 	    Res
