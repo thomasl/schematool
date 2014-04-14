@@ -23,48 +23,35 @@
 %% rewritten and/or copied. 
 %%
 %% NOTE: to run schematool, see ../bin/schematool.pl
-%%   (Also see Makefile for WF or erlmail.)
+%%   (For examples, see Makefile for WF or erlmail.)
 %%
 %% This module is the start of schema processing once we
 %% have the schema module compiled and generated.
 %%
-%% Update the schema() type family appropriately when
-%% adding new options.
+%% The schema is stored in a file foo.schema, which
+%% is preprocessed into foo.schema.term by schematool.pl.
+%% Note that multiple schema.term files can be merged
+%% into a master schema, which is suitable for applications
+%% defining their own local schemas.
 %%
-%% Architectural notes:
-%% - we should PERHAPS have a god-node containing
-%%   the schema and all related info (e.g., all versions), 
-%%   then propagate the create/migrate info to all work-nodes
-%%   * we then avoid trouble with doing dangerous ops
-%%     like mnesia:delete_schema on possibly every node
-%% - schematool should be configurable to do a BACKUP
-%%   before any dangerous/lossy migration
-%%   * how to detect this? [mark ops as dangerous?]
-%%   * how to do this?
-%%     - how to be efficient about it?
-%%   * where to insert the backup operation?
-%%   * where to configure that backup is desired?
-%%   * how to trigger rollback to backup?
-%%   * how to implement full rollback?
-%%   (* can/should we use checkpoints instead?)
+%% The foo.schema.term file can then be loaded into the
+%% system and viewed among the candidate schemas. The candidates
+%% are indexed by load time, and are stored persistently.
 %%
-%% Here's how it PROBABLY should be:
-%% - store the current schema in mnesia (table:schematool_schema)
-%%   * as "datetime -> schemablob" + 'current'
-%% - on an upgrade, diff the new and current schema to get
-%%   migration instructions
-%%   * script should detect init vs upgrade
-%% - generate upgrade instructions
-%%   * later on: run them automatically
+%% Finally, the system can migrate to a candidate schema.
+%% This takes a backup of the system tables, perform the
+%% changes and stops with the new model. If migration fails,
+%% the system rolls back to the backup and possibly restarts.
+%% (This is entirely handled by the migration process).
+%%
+%% Internally, schematool adds a small number of internal
+%% tables to hold information such as the candidate schemas,
+%% a changelog and some internal values.
 %%
 %% Advanced topics:
 %% - qlc
 %% - automatic accessors (using indexes etc, in a
-%%   single consistent notation)
-%% - discless nodes
-%% - merging independent copies of mnesia
-%%   (may fail if same table created independently
-%%   on two nodes, do the song-and-dance)
+%%   single consistent notation) = query language
 
 %% STATUS
 %% - creates schema from spec routinely (on 1 node)
@@ -72,6 +59,8 @@
 %% - performed a 1-record layout transformation
 %%   * black triangle day :-)
 %%   * does NOT properly detect that migration failed
+%% - schema merge supported
+%%   * still some usage issues, e.g., 'all_nodes'
 %%
 %% UNFINISHED
 %% - reuse parametrized schema
@@ -80,9 +69,6 @@
 %% - derive schema by checking mnesia
 %% - verify schema (derived vs latest)
 %% - repair schema: diff
-%% - MERGE multiple schemas into one
-%%   * each app can have its own schema
-%%   * detect clashes (esp. table names)
 
 -module(schematool).
 -export(
@@ -91,7 +77,9 @@
     load_and_migrate/1,
     load_schema/1,
     migrate_to/1,
-    diff/2
+    diff/2,
+    merge/1,
+    merge/2
    ]).
 
 -export([view_schemas/0,
@@ -106,7 +94,9 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 install(Nodes) ->
-    schematool_admin:install(Nodes).
+    schematool_admin:install(Nodes),
+    %% printout (is this useful?)
+    mnesia:info().
 
 load_and_migrate(File) ->
     Schema_key = schematool_admin:load_schema_file(File),
@@ -135,6 +125,127 @@ current_schema() ->
 
 history() ->
     schematool_admin:view_history().
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Merge multiple schemas into one
+%%
+%% - read all the schemas
+%% - check for conflicts
+%% - merge schemas if ok + add annotation
+%%
+%% Note: uses of 'all_nodes' are everywhere replaced by the list of
+%% nodes given (perhaps empty).
+
+merge(Files) ->
+    io:format("Warning: merge/1: no nodes given, using empty list", []),
+    merge(Files, []).
+
+merge(Files, Nodes) ->
+    Schemas = [ {F, schematool_admin:consult(F)} || F <- Files ],
+    PreSchema = merge_schemas(Schemas),
+    subst(all_nodes, Nodes, PreSchema).
+
+%% merge_with: merge a schema with a processed other schema.
+%%
+%% (We process the initial schema to make conflict checking cheaper)
+%%
+%% UNFINISHED
+%% - Others, like vsn and nodes, need to be handled for this to work
+%%   * 'vsn' applies only to the schema file
+%%   * 'nodes' applies only to schema file, but should perhaps be added
+%%     from the outside
+%%   * note that table nodes may be a bit iffy too! we should perhaps
+%%     have a placeholder
+
+merge_schemas(Schemas) ->
+    to_list(
+      lists:foldl(
+	fun merge_schema/2,
+	empty_schema(),
+	Schemas)).
+
+merge_schema({File, Schema}, PrevSch0) ->
+    lists:foldl(
+      fun({table, Tab, Opts0}, PrevSch) ->
+	      Opts = canonical_table_opts(Opts0),
+	      case lookup(Tab, PrevSch) of
+		  not_found ->
+		      %% OK, update
+		      insert(Tab, Opts, File, PrevSch);
+		  {found, PrevOpts, PrevFiles} ->
+		      if
+			  Opts == PrevOpts ->
+			      %% mark Tab as also defined in File
+			      io:format("Warning: table ~p defined in multiple schemas\n"
+					" ~p\n",
+					[Tab, PrevFiles ++ [File]]),
+			      also_in_file(Tab, File, PrevSch);
+			  true ->
+			      %% clash, log error
+			      io:format("Error: Schema clash: table ~p declared with\n"
+					" prev opts: ~p\n curr opts: ~p\n"
+					" curr file ~p\n"
+					" prev files: ~p\n",
+					[Tab, PrevOpts, Opts,
+					 File, PrevFiles]),
+			      exit(unable_to_merge_schemas)
+		      end
+	      end;
+	 (Other, PrevSch) ->
+	      append_to(PrevSch, Other)
+      end,
+      PrevSch0,
+      Schema).
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% the ADT
+
+empty_schema() ->
+    {dict:new(), []}.
+
+lookup(Tab, {TabDefs, _Others}) ->
+    case dict:find(Tab, TabDefs) of
+	{ok, {Value, Files}} ->
+	    {found, Value, Files};
+	_ ->
+	    not_found
+    end.
+
+insert(Tab, Opts, File, {TabDefs, Others}) ->
+    {dict:store(Tab, {Opts, [File]}, TabDefs), Others}.
+
+%% We drop the files of origin, is this OK?
+
+to_list({TabDefs, Others}) ->
+    Others ++ [ {table, Tab, Opts} || {Tab, {Opts, _Files}} <- dict:to_list(TabDefs) ].
+
+%% Update, add File to the Files of the Tab (which should exist)
+
+also_in_file(Tab, File, {TabDefs, Others}) ->
+    NewTabDefs = dict:update(
+		   Tab, 
+		   fun({Opts, Files}) ->
+			   {Opts, Files ++ [File]}
+		   end,
+		   [File],
+		   TabDefs),
+    {NewTabDefs, Others}.
+
+%% NB: could store Others reversed and convert appropriately
+%% in to_list/1, but there are usually ~1 Other per schema so
+%% do it when there's need.
+
+append_to({TabDefs, Others}, Other) ->
+    {TabDefs, Others ++ [Other]}.
+
+%% To check for option sameness, we sort the options and
+%% then check structural equality (==). This is insufficient
+%% if there are, say, suboptions that should be canonicalized too,
+%% or options where the default is same. (In short, further
+%% canonicalization is needed to do it just right.)
+%%
+canonical_table_opts(Opts) ->
+    lists:sort(Opts).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Diff schema1 and schema2 (old vs new). Foundation for
@@ -324,3 +435,25 @@ cons(Key, [], Rest) ->
 cons(Key, Val, Rest) ->
     [{Key, Val}|Rest].
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%
+%% Used primarily to replace 'well-known keys' like 'all_nodes' in
+%% schema. This makes the schemas more portable.
+
+subst(Key, Val, [X|Xs]) ->
+    [subst(Key, Val, X)|subst(Key, Val, Xs)];
+subst(Key, Val, []) ->
+    [];
+subst(Key, Val, Tuple) when is_tuple(Tuple) ->
+    list_to_tuple([ subst(Key, Val, X) || X <- tuple_to_list(Tuple) ]);
+subst(Key, Val, Term) when is_atom(Term) ->
+    if
+	Key == Term ->
+	    Val;
+	true ->
+	    Term
+    end;
+subst(_Key, _Val, Term) ->
+    Term.
+
+    
