@@ -396,17 +396,18 @@ temp_table_name(Tab) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Alter table layout, using schematool_transform
 %%
-%% - where are the attribute and record xforms?
-%%   + how do we invoke them?
+%% Explicit transforms are currently defined as
+%%  {transform, ..., Xform}
+%% where Xform is a table transform (see schematool_transform for now).
+%%
+%% Note: for SERIOUS use we need to invoke the right (Vsn -> Vsn)
+%%  transform; perhaps this should be specified some other way.
+%%  The approach here basically implies that we know where we're
+%% coming from.
 %%
 %% UNFINISHED
-%% - transforms are specified simplistically, we should have
-%%   some sort of (Vsn -> Vsn) key like appup to avoid
-%%   implicit dependences on "previous" schema
-%% - we currently permit
-%%     {transform, ..., Xf}
-%%   where Xf is a schematool_transform table xform.
-%% - should pass something that can select correctly versioned xforms
+%% - select correct version of xform
+%% - some better way to specify xforms
 
 alter_table_layout(Tab, Old_opts, New_opts, Actions) ->
     Old_rec_def = schematool_transform:rec_def_of({table, Tab, Old_opts}),
