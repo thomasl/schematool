@@ -13,6 +13,10 @@
 ##   in ./data/
 ## - currently mixes tests and libraries
 
+## UNFINISHED
+## - should read the node name from somewhere, etc
+NODE=test@$(shell hostname -s)
+
 SCHEMATOOL_INC_DIR=../include
 SCHEMATOOL_SRC_DIR=../src
 
@@ -63,6 +67,13 @@ SCHEMATOOL_OBJS := $(patsubst %.erl,../ebin/%.beam,$(SCHEMATOOL_SRC))
 all: $(SCHEMATOOL_OBJS)
 
 test: $(SCHEMATOOL_TESTS)
+
+## Start an erlang with the proper paths and node.
+
+test-dev:
+	erl -pa ../src/ebin -pa ./ebin  -sname $(NODE)
+
+## Cleanup rules
 
 clean: clean_beam clean_test
 
