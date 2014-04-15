@@ -117,7 +117,7 @@ table(Tab, Xforms, Old, New = {New_rec, New_attr_dflts}) ->
       fun(Rec) ->
 	      KVs = rec_kv(Old, Rec),
 	      NewKVs = xforms(Xforms, KVs),
-	      NewRec = kv_rec(New, KVs),
+	      NewRec = kv_rec(New, NewKVs),
 	      NewRec
       end,
       New_attrs,
