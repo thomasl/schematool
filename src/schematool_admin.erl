@@ -75,9 +75,12 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Run this to initialize schematool (only) on the specified nodes.
 %%
+%% NOTE: mnesia must NOT be running when this is invoked. If so, the
+%% schema creation fails. Mnesia is great that way.
+%%
 %% UNFINISHED
 %% - if schema exists or schematool exists, we get a confusing fail
-%% - schematool tables should really also use a schema
+%% - schematool tables themselves should really also use a schema
 %%   * allow migration
 %%   * change nodes involved
 %%   * need bootstrap procedure
