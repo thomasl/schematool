@@ -348,7 +348,7 @@ definition(Schema_key) ->
 migrate_to(Schema_key) ->
     wait_for_mnesia(),
     case current_schema() of
-	not_found ->
+	undefined ->
 	    New_schema = definition(Schema_key),
 	    install_schema(New_schema),
 	    ?txn(set_current_schema(Schema_key));
