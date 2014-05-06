@@ -334,8 +334,9 @@ storage_changes(_Tab, []) ->
 %% fill in the defaults if the value is missing, ie the attribute is
 %% new.
 %%
-%% NOTE: Currently no handling of attribute value transforms.
-%%  Invoke schematool_transform:table/4 to add such transforms.
+%% NOTE: Currently no handling of attribute value transforms. (The
+%%  format is unclear.)  Invoke schematool_transform:table/4 to
+%%  perform such transforms.
 
 layout_transform(Tab, Opts0, Opts1) ->
     Rec0a = {R0, As0} = rec_info(Tab, Opts0),
@@ -346,10 +347,6 @@ layout_transform(Tab, Opts0, Opts1) ->
 	Rec0 == Rec1 ->
 	    [];
 	true ->
-	    %% UNFINISHED
-	    %% - make sure the Rec1a attr defaults do not overwrite
-	    %%   existing records, just use it if attr is new
-	    %% - should probably be done in schematool_transform:table/N
 	    [{schematool_transform, table, [Tab, Rec0a, Rec1a]}]
     end.
 
