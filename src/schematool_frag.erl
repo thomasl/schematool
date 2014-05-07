@@ -98,6 +98,7 @@
 %%   needs_copy (table can't be adjusted, needs to be copied)
 %%   ...        (adjust table)
 
+%% OBSOLETE?
 diff(Opts0, Opts1) ->
     Fr0 = proplists:get_value(frag_properies, Opts0, undefined),
     Fr1 = proplists:get_value(frag_properies, Opts1, undefined),
@@ -154,23 +155,21 @@ delete_pool_nodes(Tab, Nodes) ->
       Nodes).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Alter the fragmentation status and number of fragments
-%% of the table.
+%% Alter the fragmentation status and number of fragments of the
+%% table.
 %%
-%% This is done by the schematool option {fragments, N}.
-%% N = 0 means the table is not fragmented, otherwise
-%% specifies N fragments.
+%% This is done by the schematool option {fragments, N}.  N = 0 means
+%% the table is not fragmented, otherwise specifies N fragments.
 %%
-%% Automatically activates/deactivates fragmentation too.
-%% - or maybe the adjust call should be a helper?
+%% Automatically activates/deactivates fragmentation too.  - or maybe
+%% the adjust call should be a helper?
 %%
-%% NOTE: we can remove ALL fragments by iterating
-%%  del_frag until it returns {no_exists, Tab}
-%%  after which point it can be deactivated
+%% NOTE: we can remove ALL fragments by iterating del_frag until it
+%%  returns {no_exists, Tab} after which point it can be deactivated
 %%
-%% NOTE: Running this can be expensive, since each
-%%  add/del operation means rehashing. Adding or deleting more
-%%  than one fragment can be costly.
+%% NOTE: Running this can be expensive, since each add/del operation
+%%  means rehashing and copying. Adding or deleting more than one
+%%  fragment can be costly.
 
 alter_fragments(Tab, Old, New, Actions) ->
     Old_N = declared_fragments(Old),
