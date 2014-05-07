@@ -3,78 +3,24 @@
 %%% Description : 
 %%% Created :  2 May 2014 by Thomas Lindgren <>
 
-%% NOTE: use schematool.erl as the entrypoint.
+%% NOTE: use schematool.erl as the entrypoint. This is just
+%% to handle ONE CHANGED TABLE.
 %%
-%% We have, in essence:
-%% - table added
-%% - table deleted
-%% - table changed
+%% This version relies on the following ideas:
+%% - table migration can ALWAYS be done by creating the new table
+%%   and copying the data to it (often via a temporary table)
+%% - we want to detect and optimize situations when full copying
+%%   is not needed
 %%
-%% New table migration thing, based on table copying.  Failsafe
-%% approach: table copying (perhaps twice).  Try to detect situations
-%% when you can do better. In some cases, you can just flip some
-%% options or add/del indexes or table copies. In other cases, like a
-%% table layout change, you can do a mnesia table rewrite. In the
-%% worst case, you will have to copy the table twice.
-%%
-%% Copying twice is needed because we usually need to keep the table
-%% name, and there is no mnesia rename operation. (Sigh.)
-%%
-%% The copy operation is staged depending on what is being done. In
-%% essence, we want to minimize the cost in time and space. The
-%% approach should be dynamically decided based on table size.
-%%
-%% Schematool should perhaps provide a way to DYNAMICALLY resolve
-%% table names to tables. That way, the second copy is not needed
-%% (just redirect the name to the new table).
+%% In some cases, the "optimized" version may be slower than a
+%% full copy, due to the large amount of data shuffling implied
+%% in the specifications. 
 
 -module(schematool2).
 
-%% What are the dimensions that may change for a table?
-%% - table nodes
-%% - fragmentation
-%% - layout
-%% - indexes
-%% - type, storage type
-%% - simple options
-%% - difficult options [need copying]
-%%
-%% Typical worst case (Src -> Dst):
-%% 1/ create Tmp, compatible with leastcost(Src, Dst)
-%% 2/ copy all records from Src to Tmp
-%% 3/ create Dst (if Src = Dst, delete Src then recreate)
-%% 4/ copy all records from Tmp to Dst
-%% 5/ delete Tmp
-%%
-%% Table planning:
-%% - should Tmp be compatible with Src or Dst?
-%% - what does "compatible" mean?
-%%   * "bare bones" to hold records cheaply and cheerfully
-%%   * represent records faithfully
-%%     = either old or new layout
-%%   * any storage option, ram_copies should be fastest
-%%   * no extra indexes
-%%   * type: ... ("compatible")
-%%   * table nodes: use a single node? 
-%%   * simple and difficult options: skip as many as possible
-%% - when to do layout transformation?
-%% - when to create indexes?
-%%
-%% Fragmentation handling? This can apparently be done
-%% on the fly, see the existing table.
-%%
-%% Special cases:
-%% - transform layout
-%% - change options of existing table
-%% - both layout and options
-%% - add or delete table copy
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Return what strategy is needed
-%% - full copy
-%% - layout transform
-%% - options change
-%% - layout + options
+%% Given a table with old and new options, generate the actions
+%% to change the table from old to new.
 %%
 %% Layout change is defined by record name and attributes (and defaults).
 %%
@@ -83,25 +29,31 @@
 %% - otherwise, possibly empty options change
 %%
 %% UNFINISHED
-%% - if full_copy = full_copy, we need to emit something useful
-%%   (otherwise, just do the rest)
-%% - if layout = true, return a transform spec and insert it
-%%   into the list of others appropriately
+%% - no handling of explicit layout transforms yet (e.g., computed attrs)
+%%   * need notation for explicit xforms
+%% - the no_copy case assumes operations come out in a safe order,
+%%   we should ENSURE that this is the case
+%% - the no_copy case should reorder operations to reduce costs
+%% - switch from no_copy to full_copy if estimated cost is too high
+%%   (do a final check)
 
-analyze_options(Tab, Old_opts, New_opts) ->
+alter_table(Tab, Opts, Opts) ->
+    %% (unchanged: detect this common special case quickly)
+    [];
+alter_table(Tab, Old_opts, New_opts) ->
     Full_copy = full_copy_needed(Tab, Old_opts, New_opts),
     Layout = layout_transform(Tab, Old_opts, New_opts),
     case Full_copy of
 	full_copy ->
-	    %% Layout
 	    lists:flatten(
 	      [{schematool_helper, full_copy, [Tab, Old_opts, New_opts]},
 	       Layout]);
 	no_copy ->
 	    Storage = table_storage_changes(Tab, Old_opts, New_opts),
 	    Minors  = table_minor_options(Tab, Old_opts, New_opts),
+	    Frags = table_fragment_changes(Tab, Old_opts, New_opts),
 	    Indexes = table_index_changes(Tab, Old_opts, New_opts),
-	    Layout ++ Storage ++ Minors ++ Indexes
+	    Layout ++ Storage ++ Minors ++ Frags ++ Indexes
     end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -334,9 +286,8 @@ storage_changes(_Tab, []) ->
 %% fill in the defaults if the value is missing, ie the attribute is
 %% new.
 %%
-%% NOTE: Currently no handling of attribute value transforms. (The
-%%  format is unclear.)  Invoke schematool_transform:table/4 to
-%%  perform such transforms.
+%% UNFINISHED
+%% - user-defined attribute transforms not done yet
 
 layout_transform(Tab, Opts0, Opts1) ->
     Rec0a = {R0, As0} = rec_info(Tab, Opts0),
@@ -395,6 +346,116 @@ semi_zip([A|As], [D|Ds]) ->
     [{A, D}|semi_zip(As, Ds)];
 semi_zip([], []) ->
     [].
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Fragment handling
+%%
+%% We can alter two things at the moment:
+%% - the table node pool
+%% - the table fragments
+%%
+%% NB: We adjust the fragment status after everything else at the moment,
+%% so there may be a lot of shuffling going on during a migration.
+%%
+%% Fragmentation options are given as:
+%%
+%% {frag_properties, FragProps} = list of the following
+%%   (FragProps = [] means not fragmented)
+%%
+%% {n_fragments, N}
+%% {node_pool, Nodes}
+%% {n_ram_copies, N}          num replicas of type per fragment
+%% {n_disc_copies, N}         dito
+%% {n_disc_only_copies, N}    dito
+%% {foreign_key, {ForeignTab, Attr}}  
+%% {hash_module, M}   M module
+%% {hash_state, St}   St term
+%%
+%% NB: we can vary node pool and fragments at runtime, the rest have
+%% no explicit operations for this. I THINK we can do it by deactivating
+%% fragmentation, then activating with new values.
+%%
+%% UNFINISHED
+%% - we should perhaps look at the {frag_properties, Props} item instead
+%% - change hash function and other misc fragmentation specific stuff
+%%   * there's some of it, isn't there?
+%% - order fragmentation ops with the others to get better behaviour
+%% - this code may be a bit redundant, consider refactoring
+
+table_fragment_changes(Tab, Old_opts, New_opts) ->
+    FragProps0 = proplists:get_value(frag_properties, Old_opts, []),
+    FragProps1 = proplists:get_value(frag_properties, New_opts, []),
+    case {FragProps0, FragProps1} of
+	{[], []} ->
+	    %% Table not fragmented
+	    [];
+	{[], Opts} when Opts =/= [] ->
+	    %% Table has become fragmented
+	    [{mnesia, change_table_frag, [Tab, {activate, FragProps1}]}];
+	{Opts, []} when Opts =/= [] ->
+	    %% Table was fragmented, make it unfragmented
+	    [{mnesia, change_table_frag, [Tab, deactivate]}];
+	{_Fr0, _Fr1} ->
+	    %% Table was and remains fragmented, see what to do
+	    case need_full_frag_change(FragProps0, FragProps1) of
+		true ->
+		    [{comment, "Requires full fragmentation change"},
+		     {mnesia, change_table_frag, [Tab, deactivate]},
+		     {mnesia, change_table_frag, [Tab, {activate, FragProps1}]}];
+		false ->
+		    alter_node_pool(
+		      Tab, FragProps0, FragProps1,
+		      alter_fragments(Tab, FragProps0, FragProps1, []))
+	    end
+    end.
+
+%% need_full_frag_change: we have a number of "sensitive" options.
+%% If their values differ in the two lists, we need a full change. Otherwise,
+%% we're good.
+
+need_full_frag_change(Opts0, Opts1) ->
+    D0 = dict:from_list([{Opt, {Val, undefined}} || {Opt, Val} <- Opts0 ]),
+    D1 = dict:from_list([{Opt, {undefined, Val}} || {Opt, Val} <- Opts1 ]),
+    D2 = dict:merge(
+	   fun(Key, {Val0, undefined}, {undefined, Val1}) ->
+		   {Val0, Val1}
+	   end,
+	   D0,
+	   D1),
+    Opts = dict:to_list(D2),
+    lists:any(fun ff_change_opt/1, Opts).
+
+%% If the options are safe, or the values are the same, full frag change is not
+%% needed. Otherwise, it is needed.
+
+ff_change_opt({node_pool, _}) ->
+    false;
+ff_change_opt({n_fragments, _}) ->
+    false;
+ff_change_opt({_Opt, {Val, Val}}) ->
+    false;
+ff_change_opt({_Opt, {Val0, Val1}}) when Val0 =/= Val1 ->
+    true.
+
+%% look through the frag_properties and see whether nodes need to be changed
+
+alter_node_pool(Tab, Old_opts, New_opts, RestActions) ->
+    OldPool = proplists:get_value(node_pool, Old_opts, []),
+    NewPool = proplists:get_value(node_pool, New_opts, []),
+    schematool_frag:alter_node_pool(Tab, OldPool, NewPool, RestActions).
+
+%% look through frag_properies and alter the number of fragments,
+%% if needed
+
+alter_fragments(Tab, FragOpts0, FragOpts1, RestActions) ->
+    OldF = proplists:get_value(n_fragments, FragOpts0, 1),
+    NewF = proplists:get_value(n_fragments, FragOpts1, 1),
+    if
+	OldF == NewF ->
+	    RestActions;
+	true ->
+	    [{schematool_helper, adjust_fragments, [Tab, OldF, NewF]}|RestActions]
+    end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% We need to split this into two:
