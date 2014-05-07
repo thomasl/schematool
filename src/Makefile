@@ -59,7 +59,8 @@ SCHEMATOOL_MODS= \
 	schematool_options \
 	schematool_verify \
 	schematool_xf \
-	schematool2
+	schematool2 \
+	schematool2_test \
 
 SCHEMATOOL_SRC := $(patsubst %, %.erl, $(SCHEMATOOL_MODS))
 OM_SRC=$(SCHEMATOOL_SRC)
