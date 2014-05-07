@@ -248,6 +248,61 @@ canonical_table_opts(Opts) ->
     lists:sort(Opts).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Diff the two schemas, returning instructions to go from old S0 to
+%% new S1.
+%%
+%% Compute the tables added, deleted or changed between the schemas.
+%% Added tables are created, deleted tables are deleted.  For
+%% (potentially) changed tables, we use schematool2:alter_table to find
+%% instructions to migrate from S0 to S1.
+%%
+%% NEW VERSION
+%% - only diff tables, skip {nodes, Ns} for now (or anything else)
+
+diff(S0, S1) ->
+    {Added, Changed, Deleted} = table_changes(S0, S1),
+    lists:flatten(
+      [ [ {mnesia, create_table, [Tab, Opts]} || {table, Tab, Opts} <- Added ],
+	[ {mnesia, delete_table, [Tab]} || {table, Tab, _Opts} <- Deleted ],
+	[ schematool2:alter_table(Tab, Old_opts, New_opts)
+	  || {table, Tab, Old_opts, New_opts} <- Changed ]
+       ]).
+
+%% Tables in S1 but not in S0 are added.
+%% Tables in S0 but not in S1 are deleted.
+%% Tables in both S0 and S1 are (potentially) changed.
+
+table_changes(S0, S1) ->
+    D0 = dict:from_list([ {Tab, {Opts, undefined}} || {table, Tab, Opts} <- S0 ]),
+    D1 = dict:from_list([ {Tab, {undefined, Opts}} || {table, Tab, Opts} <- S1 ]),
+    D2 = dict:merge(
+	   fun(Tab, {Old_opts, undefined}, {undefined, New_opts}) ->
+		   {Old_opts, New_opts}
+	   end,
+	   D0,
+	   D1),
+    changes(dict:to_list(D2)).
+
+%% Construct the lists of A/D/C tables
+
+changes(Lst) ->
+    RevA = [],
+    RevD = [],
+    RevC = [],
+    changes(Lst, RevA, RevD, RevC).
+
+changes([{Tab, {undefined, Opts}}|Xs], RevA, RevD, RevC) ->
+    changes(Xs, [{table, Tab, Opts}|RevA], RevD, RevC);
+changes([{Tab, {Opts, undefined}}|Xs], RevA, RevD, RevC) ->
+    changes(Xs, RevA, [{table, Tab, Opts}|RevD], RevC);
+changes([{Tab, {Old_opts, New_opts}}|Xs], RevA, RevD, RevC) ->
+    changes(Xs, RevA, RevD, [{table, Tab, Old_opts, New_opts}|RevC]);
+changes([], RevA, RevD, RevC) ->
+    {lists:reverse(RevA), lists:reverse(RevD), lists:reverse(RevC)}.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% OBSOLETE?
+%%
 %% Diff schema1 and schema2 (old vs new). Foundation for
 %% performing upgrade/downgrade/...
 %% 
@@ -268,7 +323,9 @@ canonical_table_opts(Opts) ->
 %%
 %% NB: not sure if the nodes diff is interesting anymore?
 
-diff(S0, S1) ->
+%% OBSOLETE?
+
+diff_old(S0, S1) ->
     N = nodediff(S0, S1),
     Ts = tablesdiff(S0, S1),
     cons(nodes, N, cons(tables, Ts, [])).
