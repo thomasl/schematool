@@ -30,6 +30,7 @@
    [
     table/3,
     table/4,
+    table_copy/5,
     rec_kv/2,
     kv_rec/2,
     rec_def_of/1
@@ -101,7 +102,7 @@ schema(#schematool_info{schema=Schema}) ->
 table(Tab, Old, New) ->
     table(Tab, [], Old, New).
 
-%% Update the tabel to the new layout
+%% Update the table to the new layout
 %% 
 %% NOTE: mnesia:transform_table/4 is implicitly a txn => do not wrap.
 %%
@@ -123,6 +124,22 @@ table(Tab, Xforms, Old, New = {New_rec, New_attr_dflts}) ->
       New_attrs,
       New_rec).
 
+%% Basically table/4 except move data from Tab0 to Tab1.
+%%  This can be used to combine a full table copy with
+%% various transforms, saving a read/write cycle.
+%%
+%% NOTE: May need txn context.
+
+table_copy(Tab0, Tab1, Xforms, Rec_def_0, Rec_def_1) ->
+    mnesia:foldl(
+      fun(Rec, Acc) ->
+	      KVs = rec_kv(Rec_def_0, Rec),
+	      NewKVs = xforms(Xforms, KVs),
+	      NewRec = kv_rec(Rec_def_1, NewKVs),
+	      ok = mnesia:write(Tab1, NewRec, write)
+      end,
+      Tab0).
+ 
 %% UNFINISHED
 %% - is this available elsewhere?
 

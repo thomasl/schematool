@@ -23,6 +23,11 @@
     add_pool_nodes/2,
     delete_pool_nodes/2
    ]).
+-export(
+   [full_migrate/3,
+    full_migrate_xform/4
+   ]
+  ).
 
 %% Add new mnesia node N + replicate schema to it
 %%
@@ -149,6 +154,12 @@ copy_table(Tab0, Tab1) ->
 
 lossy_copy_table(Coll, Tab0, Tab1) ->
     schematool_table:lossy_copy_table(Coll, Tab0, Tab1).
+
+full_migrate(Tab, Opts0, Opts1) ->
+    schematool_table:full_migrate(Tab, Opts0, Opts1).
+
+full_migrate_xform(Xforms, Tab, Opts0, Opts1) ->
+    schematool_table:full_migrate_xform(Xforms, Tab, Opts0, Opts1).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Operations on fragmented tables and associated stuff. Can also

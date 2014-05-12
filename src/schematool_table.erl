@@ -57,7 +57,11 @@
     lossy_copy_table/3,
     migration_needs_table_copy/1
    ]).
-
+-export(
+   [full_migrate/3,
+    full_migrate_xform/4
+   ]
+  ).
 -import(proplists, 
 	[get_value/3,
 	 get_all_values/2
@@ -632,3 +636,84 @@ lossy_copy_table(Other, _Tab0, _Tab1) ->
     exit({collision_policy_not_yet_handled, Other}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%
+%% full_migrate/3:
+%% 1/ create temporary table Tmp with Opts0
+%% 2/ copy all data to Tmp
+%% 3/ delete Tab, then create Tab with Opts1
+%% 4/ copy all data to Tab
+%% 5/ delete Tmp, finished
+%%
+%% NOTES:
+%% - requires TWO copies because mnesia does not have
+%%   a rename table operation
+%% - failing in the middle is bad, need to check
+%%   whether the backup/checkpointing approach works
+%% - using the tables while this is ongoing may lead to trouble
+%%   * esp. writes to Tab!
+%% 
+%% UNFINISHED
+%% - do we need to implement "rollback" on this level?
+%% - [cost] may be better to create Tmp with Opts1 rather than Opts0,
+%%   or with another new set of options => cheaper copies
+%%   * e.g., small tables: use ram_copies or ets
+
+full_migrate(Tab, Opts0, Opts1) ->
+    Tmp = temp_table_name(Tab),
+    RecName = mnesia:table_info(Tab, record_name),
+    Opts00 = lists:keydelete(record_name, 1, Opts0),
+    mnesia:create_table(Tmp, [{record_name, Tab}|Opts00]),
+    copy_all_data(Tab, Tmp),
+    %% Failing after this means we have to recreate Tab
+    %% to do rollback
+    mnesia:delete_table(Tab),
+    mnesia:create_table(Tab, Opts1),
+    copy_all_data(Tmp, Tab),
+    %% Failing before this can be undone by
+    %% copying the records of Tmp back to Tab (after
+    %% recreating Tab)
+    mnesia:delete_table(Tmp),
+    ok.
+
+%% Migrate table from Opts0 to Opts1 and also perform
+%% the transformations Xforms
+%%
+%% UNFINISHED
+%% - see full_migrate/3 for discussion of weaknesses
+
+full_migrate_xform(Xforms, Tab, Opts0, Opts1) ->
+    Tmp = temp_table_name(Tab),
+    RecName = mnesia:table_info(Tab, record_name),
+    Opts00 = lists:keydelete(record_name, 1, Opts0),
+    mnesia:create_table(Tmp, [{record_name, Tab}|Opts00]),
+    copy_all_data(Tab, Tmp),
+    %% Failing after this means we have to recreate Tab
+    %% to do rollback
+    mnesia:delete_table(Tab),
+    mnesia:create_table(Tab, Opts1),
+    xform_copy_all_data(Tmp, Tab, Xforms, Opts00, Opts1),
+    %% Failing before this can be undone by
+    %% recreating Tab and copying Tmp back to Tab
+    mnesia:delete_table(Tmp),
+    ok.
+
+%% Copy all records from Tab0 to Tab1.
+
+copy_all_data(Tab0, Tab1) ->
+    mnesia:transaction(
+      fun() ->
+	      mnesia:foldl(
+		fun(Rec, Acc) ->
+			ok = mnesia:write(Tab1, Rec, write)
+		end,
+		Tab0)
+      end).
+
+%% Copy all records from Tab0 to Tab1, while also transforming it according
+%% to Xforms.
+
+xform_copy_all_data(Tab0, Tab1, Xforms, Opts0, Opts1) ->
+    RecDef0 = schematool_transform:rec_def_of({table, Tab0, Opts0}),
+    RecDef1 = schematool_transform:rec_def_of({table, Tab1, Opts1}),
+    schematool_transform:table_copy(Tab0, Tab1, Xforms, RecDef0, RecDef1).
+		
