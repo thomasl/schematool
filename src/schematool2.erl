@@ -46,7 +46,7 @@ alter_table(Tab, Old_opts, New_opts) ->
     case Full_copy of
 	full_copy ->
 	    lists:flatten(
-	      [{schematool_helper, full_copy, [Tab, Old_opts, New_opts]},
+	      [{schematool_helper, full_migrate, [Tab, Old_opts, New_opts]},
 	       Layout]);
 	no_copy ->
 	    Storage = table_storage_changes(Tab, Old_opts, New_opts),
