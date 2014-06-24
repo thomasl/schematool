@@ -78,6 +78,7 @@
     load_schema/1,
     migrate_to/1,
     diff/2,
+    diff_keys/2,
     merge/1,
     merge/2
    ]).
@@ -258,6 +259,9 @@ canonical_table_opts(Opts) ->
 %%
 %% NEW VERSION
 %% - only diff tables, skip {nodes, Ns} for now (or anything else)
+
+diff_keys(K0, K1) ->
+    diff(schematool_admin:def(K0), schematool_admin:def(K1)).
 
 diff(S0, S1) ->
     {Added, Changed, Deleted} = table_changes(S0, S1),
