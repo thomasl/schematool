@@ -43,6 +43,44 @@ fmt_rest_args([X|Xs]) ->
     [",", io_lib:format("~p", [X])|fmt_rest_args(Xs)].
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%
+%% Utility functions to mess around with schemas
+
+update_opt(Fun, Tab, Schema) ->
+    lists:map(
+      fun({table, Tab, Opts}) ->
+	      {table, Tab, lists:map(Fun, Opts)};
+	 (Other) ->
+	      Other
+      end,
+      Schema).
+
+update_opt_all(Fun, Schema) ->
+    lists:map(
+      fun({table, Tab, Opts}) ->
+	      {table, Tab, lists:map(Fun, Opts)};
+	 (Other) ->
+	      Other
+      end,
+      Schema).
+
+update_opts(Fun, Tab, Schema) ->
+    lists:map(
+      fun({table, Tab, Opts}) ->
+	      {table, Tab, Fun(Opts)};
+	 (Other) ->
+	      Other
+      end,
+      Schema).
+
+update_all_opts(Fun, Schema) ->
+    lists:map(
+      fun({table, Tab, Opts}) ->
+	      {table, Tab, Fun(Opts)};
+	 (Other) ->
+	      Other
+      end,
+      Schema).
 
 
 
