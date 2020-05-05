@@ -308,17 +308,10 @@ delete_schema(Schema_key) ->
 %% Why do we not just use the datetime (like a previous version did)?
 %% We require this detailed key for TESTING purposes -- we want to
 %% load many schemas quickly, but this requires a better resolution than
-%% seconds. (Furthermore, erlang:now/0 even ensures uniqueness of values;
-%% possibly excluding clock drift/catchup.)
+%% seconds.
 
 make_key() ->
-    Now = {_MSec, _Sec, USec} = erlang:now(),
-    {{Y, M, D}, {HH, MM, SS}} = calendar:now_to_universal_time(Now),
-    TZ = "Z",
-    list_to_binary(
-      io_lib:format("~4.4.0w-~2.2.0w-~2.2.0wT~2.2.0w:~2.2.0w:~2.2.0w.~w~s", 
-		    [Y, M, D, HH, MM, SS, USec, TZ])
-     ).
+    schematool_time:binary_key().
 
 %% Returns the schema definition of the schema key.
 

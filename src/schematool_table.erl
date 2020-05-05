@@ -386,12 +386,7 @@ record_name_of(Tab, []) ->
 %%   is an atom (list_to_existing_atom/1 fails, or something)
 
 temp_table_name(Tab) ->
-    {A, B, C} = erlang:now(),
-    TmpName = 
-	lists:flatten(
-	  io_lib:format("~p_~p_~p_~p",
-			[Tab, A, B, C])),
-    list_to_atom(TmpName).
+    schematool_time:temp_table_name(Tab).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Alter table layout, using schematool_transform

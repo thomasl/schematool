@@ -20,7 +20,18 @@ UTIL_DIR=../smart_exceptions/devel/ebin
 # NB: We currently export everything, to simplify debugging
 
 ERLC=erlc
-ERLC_OPTS= \
+ERLC_OPTS_NOSMART= \
+	+debug_info \
+	+nowarn_unused_vars \
+	+strict_record_tests \
+	+warn_export_vars \
+	-pa ../ebin -pa $(UTIL_DIR) \
+	-I../ebin \
+	-I$(UTIL_DIR) \
+	-I$(SCHEMATOOL_INC_DIR) \
+	-o ../ebin \
+	+export_all
+ERLC_OPTS_SMART= \
 	+debug_info \
 	+nowarn_unused_vars \
 	+strict_record_tests \
@@ -32,6 +43,7 @@ ERLC_OPTS= \
 	-o ../ebin \
 	+'{parse_transform, smart_exceptions}' \
 	+export_all
+ERLC_OPTS=$(ERLC_OPTS_NOSMART)
 
 # currently not used, import bin/ scripts
 LISTIFY=perl ../bin/listify.pl
@@ -53,6 +65,7 @@ SCHEMATOOL_MODS= \
 	schematool_backup \
 	schematool_frag \
 	schematool_table \
+	schematool_time \
 	schematool_nodes \
 	schematool_transform \
 	schematool_helper \

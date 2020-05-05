@@ -43,10 +43,7 @@
 %% - should write changelog records before and after migration
 
 migrate(Old_Key, Migration) ->
-    {A, B, C} = erlang:now(),
-    Opaque = lists:flatten(
-	       io_lib:format("schematooltmp-~p-~p-~p.bup",
-			     [A,B,C])),
+    Opaque = schematool_time:opaque_backup_key(),
     Args = [],
     Tabs = schematool_admin:tables_of(Old_Key),
     migrate(Opaque, Args, Tabs, Migration).

@@ -387,7 +387,7 @@ start_mnesia_all_nodes(Ns) ->
 %%
 %% UNFINISHED
 %% - how do we UPGRADE/MIGRATE these hidden tables?
-%% - use erlang:now() instead of datetime?
+%% - use schematool_time:now() instead of datetime?
 %%   + store datetime as readable string/binary field
 %% - should we wrap this in a txn?
 
@@ -494,7 +494,7 @@ wait_for_mnesia() ->
 %% that this is just one part of migrating the schema.
 %%
 %% We currently use Datetime as the key, but should
-%% perhaps use erlang:now() instead. The datetime
+%% perhaps use schematool_time:now() instead. The datetime
 %% should always be universaltime() to avoid timezone issues.
 %% (See add_schema_info/1.)
 %% 
